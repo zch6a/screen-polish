@@ -24,3 +24,24 @@
 - Idle speed-up, vertical export, a cursor-follow mode with a click log, captions.
 - Faster rendering (decode and resample in parallel).
 - An independent review.
+
+## Round 1 — 2026-11-12 (part 1: harder recordings)
+
+Synthetic recordings meant to fool the analysis (`tests/synth.py`; still no real screen), and what they found:
+
+- **A blinking caret made a zoom for the whole video.** Every recording with a focused text field has one. A wandering mouse made a zoom too, and a mouse hovering near one spot kept one going for the whole video.
+- **A portrait phone recording**: typing along a field too wide for one zoom was mostly missed, and the zoom it got cut the field in half; two zooms overlapped in time (the analysis windows overlap); a merge of two zooms produced a 1.07x "zoom".
+- Dark theme, 4K with small text: fine.
+
+**The fix: not every change means "look here".** Each changed cell is now sorted, from a few seconds of small frames kept in memory (the video is still read once, streaming):
+- *reverting*: back to a state the cell had in the last 2 s (caret, the mouse moving off, a hover ending): ignored;
+- *persistent*: a new state still there 0.5 s later (typed text, an opened menu or dialog, a changed value): an anchor, the only thing that can start a zoom;
+- *transient*: the rest (the mouse passing, a highlight moving): keeps a zoom going for up to 3 s after its last anchor, never starts one.
+
+In the first 2 s there is no history to recognise reverting changes, so an anchor there must be bigger than a mouse pointer. Segments also split when their union no longer fits one zoom (so typing along a wide field becomes zooms the camera pans through), zooms start no earlier than the previous one ends, and merging checks that the result is still a zoom.
+
+The synthetic menu was changed: its grey items had the same colour as the desktop behind them, so the menu "opening" was invisible and only a cycling highlight showed. A real menu opening is a clear change; now it is a white panel with a border, and the highlight moves down once.
+
+**Tests**: 17 (+5): caret, wandering mouse, dark theme, a portrait phone recording (zooms one after the other, each a real zoom, together covering the field, no jumps), small text on a 4K screen (marked `slow`).
+
+An independent review is running; its findings go in part 2.

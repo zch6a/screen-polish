@@ -46,10 +46,15 @@ has no clicks in it. screen-polish works from what is in the video: where it cha
 
 - The video is decoded small and gray, 8 frames a second, and each frame is compared with the one
   before; changed pixels are pooled into cells, so that compression noise does not count.
+- **Not every change means "look here".** A change that goes back to how the screen looked a moment
+  ago (a blinking caret, the mouse moving off something, a hover effect) is ignored. Only a change that
+  stays (typed text, a menu or dialog that opened, a value that changed) can start a zoom; passing
+  changes such as the mouse moving can keep a zoom going for a few seconds, never start one.
 - **Typing, a menu, a dialog, a value updating**: the change stays in one area. In sliding windows of
   1.5 seconds, the area where it happens becomes a box, and boxes that stay in the same place for at
   least a second become a zoom: the box with a margin, the video's aspect ratio, at most 2x
-  (`--max-zoom`).
+  (`--max-zoom`). Typing along a field too wide for one zoom becomes a few, which the camera pans
+  through.
 - **Scrolling, a new page, switching windows**: much of the screen changes at once. The camera shows
   the whole screen then, so the viewer sees where they are, even between two zooms close in time.
 - The camera arrives a little before the activity and leaves a little after; each move eases in and
@@ -84,8 +89,8 @@ The ffmpeg on your PATH is used; without one, the copy that comes with it (the `
 
 - **The cursor stays as it was recorded**: it cannot be removed or smoothed afterwards, since it is part
   of the picture. Recorders that hide it and log it (Screen Studio and the like) can do that.
-- **Anything that moves draws the camera**: a video playing in a corner, an animated ad. When it picks
-  the wrong place, edit the plan.
+- **Anything that keeps changing draws the camera**: a video playing in a corner, an animated ad, a
+  live chart. When it picks the wrong place, edit the plan.
 - No speeding up of idle stretches, no captions, no vertical (9:16) export yet.
 - Speed: about real time for 1080p on a laptop (20 s of 1080p30 rendered in 25 s on an i9-12900H).
 

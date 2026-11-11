@@ -1,20 +1,29 @@
 """Where things happen on screen, and when: from frame differences to a zoom plan.
 
 The video is decoded small (320 px wide, 8 frames a second, gray) and each frame is compared with the
-one before. Changed pixels are pooled into 8x8 cells, so that compression noise and a blinking caret
-do not count, and each moment becomes a map of active cells. Then:
+one before. Changed pixels are pooled into 8x8 cells, so that compression noise does not count. Not
+every change means "look here", so each changed cell is sorted:
 
-- a moment where a large part of the screen changes (scrolling, a new page, switching windows) is
-  "global": no zoom across it, the viewer needs the whole picture;
-- in sliding windows of 1.5 s, the active cells of the local moments give a box: where to look;
-- consecutive windows whose boxes stay in the same area form a segment, and a segment long and small
-  enough becomes a zoom into its box (with a margin, the video's aspect ratio, and a limit on how far).
+- **reverting**: the cell went back to a state it had in the last 2 seconds. A blinking caret, the
+  mouse moving off something, a hover effect ending. Ignored.
+- **persistent**: a new state that is still there half a second later. Typed text, a menu or dialog
+  that opened, a value that changed. Only these can start a zoom ("anchors").
+- **transient**: the rest (the mouse passing over, a highlight moving through a menu). They keep a zoom
+  going where anchors started it, but never start one: a wandering mouse is no reason to zoom.
 
-Clicks, if a log of them is given, count as strong activity at their point.
+A moment where a large part of the screen changes (scrolling, a new page, switching windows) is
+"global": no zoom across it, the viewer needs the whole picture. In sliding windows of 1.5 s the
+activity gives a box: where to look. Consecutive windows whose boxes stay in the same area, and still
+fit in one zoom, form a segment; a segment long and small enough becomes a zoom into its box (with a
+margin, the video's aspect ratio, and a limit on how far). Typing along a wide field becomes several
+zooms one after the other, which the camera pans through.
+
+Clicks, if a log of them is given, count as anchors at their point.
 """
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import asdict, dataclass
 
 import numpy as np
@@ -26,17 +35,24 @@ ANALYSIS_FPS = 8
 NOISE = 24  # a gray level change below this is compression noise
 CELL = 8  # analysis pixels per cell side
 CELL_ACTIVE = 0.05  # share of a cell's pixels that must change for it to count
-GLOBAL = 0.30  # share of active cells above which the whole screen changed
+GLOBAL = 0.30  # share of changed cells above which the whole screen changed
+MEMORY = 2.0  # seconds: a cell returning to a state seen this recently is reverting
+PERSIST = 0.5  # seconds: a new state still there this much later is persistent
 WINDOW, HOP = 1.5, 0.5  # seconds
 NEAR = 0.25  # a box this close to its segment (centre distance, share of the frame) continues it
 MIN_SEGMENT = 1.0  # seconds of activity for a zoom
 MIN_GAIN = 1.25  # zooms smaller than this are not worth the motion
+KEEP_ALIVE = 3.0  # seconds: passing changes keep a zoom going this long after its last persistent one
+EARLY_ANCHOR = 4  # cells: in the first MEMORY seconds (no history to recognise reverting changes), an anchor
+#                   must be at least this big, so the mouse moving away from where it started does not count
 
 
 @dataclass
 class Activity:
     times: np.ndarray  # (T,) seconds
-    grids: np.ndarray  # (T, rows, cols) bool: active cells
+    grids: np.ndarray  # (T, rows, cols) bool: cells with a change that is not reverting
+    anchors: np.ndarray  # (T, rows, cols) bool: of those, the persistent ones
+    share: np.ndarray  # (T,) share of cells that changed at all: is the whole screen changing?
     width: int  # the source's size, to map cells back to pixels
     height: int
 
@@ -60,33 +76,71 @@ class Zoom:
 
 
 def activity(path, info: VideoInfo, width: int = ANALYSIS_WIDTH, fps: float = ANALYSIS_FPS) -> Activity:
+    """Streams the video once, keeping only the last few seconds of small frames in memory."""
     height = max(CELL, round(width * info.height / info.width / 2) * 2)
-    rows, cols = height // CELL, width // CELL
-    times, grids, prev = [], [], None
-    for i, f in enumerate(frames(path, width, height, fps, gray=True)):
-        if prev is not None:
-            times.append(i / fps)
-            grids.append(cells(f, prev, rows, cols))
-        prev = f
-    g = np.array(grids, bool) if grids else np.zeros((0, rows, cols), bool)
-    return Activity(np.array(times, float), g, info.width, info.height)
+    return classify(frames(path, width, height, fps, gray=True), fps, info.width, info.height)
 
 
-def cells(frame: np.ndarray, prev: np.ndarray, rows: int, cols: int) -> np.ndarray:
-    changed = np.abs(frame.astype(np.int16) - prev.astype(np.int16)) > NOISE
-    changed = changed[: rows * CELL, : cols * CELL].reshape(rows, CELL, cols, CELL)
-    return changed.mean(axis=(1, 3)) > CELL_ACTIVE
+def classify(stream, fps: float, width: int, height: int) -> Activity:
+    """The sorting described above, over a stream of small gray frames at `fps`."""
+    back, ahead = max(2, round(MEMORY * fps)), max(1, round(PERSIST * fps))
+    buf: deque[np.ndarray] = deque(maxlen=back + 1 + ahead)
+    times, grids, anchors, share = [], [], [], []
+    rows = cols = 0
+    count = 0
+
+    def judge(j: int, frames_: list[np.ndarray], pos: int) -> None:
+        """Frame number j, at position pos in frames_ (the ones before it, and up to `ahead` after)."""
+        f, prev = frames_[pos], frames_[pos - 1]
+        changed = same_cells(f, prev, rows, cols, invert=True)
+        reverting = np.zeros_like(changed)
+        for old in frames_[: pos - 1]:
+            reverting |= same_cells(f, old, rows, cols)
+        persists = same_cells(frames_[min(len(frames_) - 1, pos + ahead)], f, rows, cols)
+        fresh = changed & ~reverting
+        anchor = fresh & persists
+        if j < back and anchor.sum() < EARLY_ANCHOR:
+            anchor = np.zeros_like(anchor)
+        times.append(j / fps)
+        grids.append(fresh)
+        anchors.append(anchor)
+        share.append(float(changed.mean()))
+
+    for f in stream:
+        if not rows:
+            rows, cols = f.shape[0] // CELL, f.shape[1] // CELL
+        buf.append(f)
+        count += 1
+        j = count - 1 - ahead  # the frame judged now: `ahead` frames after it are known
+        if j >= 1:
+            judge(j, list(buf), len(buf) - 1 - ahead)
+    frames_ = list(buf)  # the last `ahead` frames: their future is the end of the video
+    first = count - len(frames_)  # frame number of frames_[0]
+    for j in range(max(1, count - ahead), count):
+        judge(j, frames_, j - first)
+    shape = (0, max(rows, 1), max(cols, 1))
+    g = np.array(grids, bool) if grids else np.zeros(shape, bool)
+    a = np.array(anchors, bool) if anchors else np.zeros(shape, bool)
+    return Activity(np.array(times, float), g, a, np.array(share, float), width, height)
+
+
+def same_cells(a: np.ndarray, b: np.ndarray, rows: int, cols: int, invert: bool = False) -> np.ndarray:
+    """Cells where two frames agree (or, with invert, differ), allowing for compression noise."""
+    changed = np.abs(a.astype(np.int16) - b.astype(np.int16)) > NOISE
+    differs = changed[: rows * CELL, : cols * CELL].reshape(rows, CELL, cols, CELL).mean(axis=(1, 3)) > CELL_ACTIVE
+    return differs if invert else ~differs
 
 
 def add_clicks(act: Activity, clicks: list[dict]) -> None:
-    """Clicks ({"t", "x", "y"} in source pixels) as activity: a 3x3 block of cells around the point, for half
+    """Clicks ({"t", "x", "y"} in source pixels) as anchors: a 3x3 block of cells around the point, for half
     a second, so that a click alone is enough for a zoom when the screen hardly changes."""
     rows, cols = act.shape
     for c in clicks:
         r = int(np.clip(c["y"] / act.height * rows, 0, rows - 1))
         k = int(np.clip(c["x"] / act.width * cols, 0, cols - 1))
         near = (act.times >= c["t"]) & (act.times <= c["t"] + 0.5)
-        act.grids[near, max(0, r - 1): r + 2, max(0, k - 1): k + 2] = True
+        for g in (act.grids, act.anchors):
+            g[near, max(0, r - 1): r + 2, max(0, k - 1): k + 2] = True
 
 
 def plan(act: Activity, max_zoom: float = 2.0) -> list[Zoom]:
@@ -94,8 +148,7 @@ def plan(act: Activity, max_zoom: float = 2.0) -> list[Zoom]:
     if not len(act.times):
         return []
     rows, cols = act.shape
-    share = act.grids.reshape(len(act.times), -1).mean(axis=1)
-    is_global = share > GLOBAL
+    is_global = act.share > GLOBAL
     duration = float(act.times[-1])
     segments: list[dict] = []
     current: dict | None = None
@@ -105,35 +158,41 @@ def plan(act: Activity, max_zoom: float = 2.0) -> list[Zoom]:
         box = None
         if inside.any() and not is_global[inside].any():
             box = _box(act.grids[inside], rows, cols)
-        if box is None:
-            current = None  # quiet, or the whole screen changed: the segment ends here
+        anchored = bool(act.anchors[inside].any()) if inside.any() else False
+        if anchored and current is not None:
+            current["anchor"] = t + WINDOW
+        alive = current is not None and t - current.get("anchor", current["start"] + WINDOW) < KEEP_ALIVE
+        if box is None or not (anchored or (alive and _near(box, current["box"]))):
+            current = None  # quiet, only passing changes, or the whole screen changed: the segment ends here
         else:
-            if current and _near(box, current["box"]) and _area(_union(box, current["box"])) < 0.5:
-                current["box"] = _union(box, current["box"])
+            union = _union(box, current["box"]) if current else box
+            if current and _near(box, current["box"]) and _area(union) < 0.5 and _zoom_rect(union, act.width, act.height, max_zoom):
+                current["box"] = union
                 current["end"] = t + WINDOW
-            else:
-                current = {"start": t, "end": t + WINDOW, "box": box}
+            elif anchored:
+                current = {"start": t, "end": t + WINDOW, "box": box, "anchor": t + WINDOW}  # elsewhere, or too big for one zoom
                 segments.append(current)
+            else:
+                current = None
         t += HOP
-    zooms = []
+    zooms: list[Zoom] = []
     for s in segments:
         start, end = _trim(act, s["start"], s["end"])
+        if zooms:  # windows overlap, so a segment can begin inside the last one: it starts where that ends
+            start = max(start, zooms[-1].end)
         if end - start < MIN_SEGMENT:
             continue
         z = _zoom_rect(s["box"], act.width, act.height, max_zoom)
         if z:
             zooms.append(Zoom(start, end, *z))
-    return _merge(zooms)
+    return _merge(zooms, act.width, act.height, max_zoom)
 
 
 def wide_moments(act: Activity, gap: float = 1.0) -> list[float]:
     """When the whole screen changed (a new page, a window switch): the camera shows all of it then, so
     the viewer sees where they are. One time per burst of change."""
-    if not len(act.times):
-        return []
-    share = act.grids.reshape(len(act.times), -1).mean(axis=1)
     out: list[float] = []
-    for t in act.times[share > GLOBAL]:
+    for t in act.times[act.share > GLOBAL]:
         if not out or t - out[-1] > gap:
             out.append(round(float(t), 3))
     return out
@@ -193,19 +252,24 @@ def _zoom_rect(box, width: int, height: int, max_zoom: float):
     return x, y, float(w), float(h)
 
 
-def _merge(zooms: list[Zoom], gap: float = 1.0) -> list[Zoom]:
-    """Neighbouring zooms on nearly the same place become one: no zooming out and back in for a pause."""
+def _merge(zooms: list[Zoom], width: int, height: int, max_zoom: float, gap: float = 1.0) -> list[Zoom]:
+    """Neighbouring zooms on nearly the same place become one (no zooming out and back in for a pause),
+    if together they still make a zoom; otherwise the camera pans from one to the other."""
     out: list[Zoom] = []
     for z in zooms:
         if out and z.start - out[-1].end < gap and _overlap(out[-1], z) > 0.5:
             p = out[-1]
-            x0, y0 = min(p.x, z.x), min(p.y, z.y)
-            x1, y1 = max(p.x + p.w, z.x + z.w), max(p.y + p.h, z.y + z.h)
-            aspect = p.w / p.h
-            w = max(x1 - x0, (y1 - y0) * aspect)
-            out[-1] = Zoom(p.start, z.end, x0, y0, w, w / aspect, p.reason)
-        else:
-            out.append(z)
+            box = (min(p.x, z.x) / width, min(p.y, z.y) / height, max(p.x + p.w, z.x + z.w) / width, max(p.y + p.h, z.y + z.h) / height)
+            # the rectangles already have their margins: fit them as they are
+            x0, y0, x1, y1 = box[0] * width, box[1] * height, box[2] * width, box[3] * height
+            aspect = width / height
+            w = max(x1 - x0, (y1 - y0) * aspect, width / max_zoom)
+            if w <= width / MIN_GAIN:
+                h = w / aspect
+                cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+                out[-1] = Zoom(p.start, z.end, float(np.clip(cx - w / 2, 0, width - w)), float(np.clip(cy - h / 2, 0, height - h)), w, h, p.reason)
+                continue
+        out.append(z)
     return out
 
 

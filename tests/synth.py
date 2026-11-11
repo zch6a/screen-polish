@@ -4,7 +4,7 @@ The default script, at 640x360 and 15 fps, 11 seconds:
   0-2 s    a still "desktop" (windows, text-like stripes)
   2-5 s    typing: small dark marks appear one by one in a field at the top right (TYPING box)
   6 s      the whole screen changes (a new page), and stays
-  7-9.5 s  a menu opens and items highlight, bottom left (MENU box)
+  7-9.5 s  a menu opens bottom left (MENU box), and the highlight moves down its items
   9.5-11 s still
 """
 
@@ -43,12 +43,74 @@ def frame_at(t: float) -> np.ndarray:
         for k in range(min(typed, 18)):  # one mark every 1/6 s
             cx = x0 + 6 + k * 10
             img[y0 + 8:y1 - 8, cx:cx + 7] = 30
-    if 7 <= t < 9.5:
+    if 7 <= t < 9.5:  # a menu opens (a white panel with a dark border), and the highlight moves down it
         x0, y0, x1, y1 = MENU
-        img[y0:y1, x0:x1] = 250
-        item = int((t - 7) * 4) % 5
+        img[y0:y1, x0:x1] = 40
+        img[y0 + 2:y1 - 2, x0 + 2:x1 - 2] = 255
+        item = min(4, int((t - 7) * 2))
         for k in range(5):
-            img[y0 + 4 + k * 19:y0 + 20 + k * 19, x0 + 4:x1 - 4] = (70, 120, 220) if k == item else (220, 220, 220)
+            top = y0 + 4 + k * 19
+            if k == item:
+                img[top:top + 16, x0 + 4:x1 - 4] = (70, 120, 220)
+            img[top + 6:top + 10, x0 + 10:x1 - 40] = 60 if k != item else 255
+    return img
+
+
+def cursor(img: np.ndarray, x: float, y: float) -> np.ndarray:
+    """An arrow mouse pointer, about 12x19 px: white with a black edge."""
+    for r in range(19):
+        y0, x0 = int(y) + r, int(x)
+        x1 = min(img.shape[1], x0 + min(12, r * 12 // 19 + 1))
+        if 0 <= y0 < img.shape[0] and x1 > x0:
+            img[y0, x0:x1] = 255
+            img[y0, x0] = img[y0, x1 - 1] = 0
+    return img
+
+
+def caret(t: float) -> np.ndarray:
+    """A focused, empty text field whose caret blinks twice a second; nothing else happens."""
+    img = desktop(1)
+    img[100:130, 300:500] = 255
+    if int(t * 2) % 2 == 0:
+        img[105:125, 310:312] = 0
+    return img
+
+
+def wandering_mouse(t: float) -> np.ndarray:
+    """The mouse drifting all over a still screen."""
+    return cursor(desktop(1), 320 + 280 * np.sin(t * 0.9), 180 + 150 * np.sin(t * 1.3))
+
+
+def dark(t: float) -> np.ndarray:
+    """The default script in a dark theme."""
+    return 255 - frame_at(t)
+
+
+PHONE = (1080, 1920)
+PHONE_FIELD = (100, 1500, 980, 1600)
+
+
+def phone(t: float) -> np.ndarray:
+    """A portrait phone recording: typing along a wide field near the bottom, 2-6 s."""
+    img = np.full((PHONE[1], PHONE[0], 3), 245, np.uint8)
+    x0, y0, x1, y1 = PHONE_FIELD
+    img[y0:y1, x0:x1] = 255
+    for k in range(min(int(max(0.0, t - 2) * 6), 24)):
+        img[y0 + 20:y1 - 20, x0 + 20 + k * 34:x0 + 44 + k * 34] = 30
+    return img
+
+
+UHD = (3840, 2160)
+UHD_FIELD = (2000, 300, 3200, 360)
+
+
+def uhd_small_text(t: float) -> np.ndarray:
+    """4K: characters 12 px wide (a normal font on a 4K screen) typed into a field, 1.5-4.5 s."""
+    img = np.full((UHD[1], UHD[0], 3), 236, np.uint8)
+    x0, y0, x1, y1 = UHD_FIELD
+    img[y0:y1, x0:x1] = 255
+    for k in range(min(int(max(0.0, t - 1.5) * 8), 24)):
+        img[y0 + 15:y1 - 15, x0 + 10 + k * 18:x0 + 22 + k * 18] = 30
     return img
 
 

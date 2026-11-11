@@ -28,6 +28,7 @@ packages = ["src/screen_polish"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
+markers = ["slow: a 4K video; deselect with -m \"not slow\""]
 
 [tool.ruff]
 line-length = 150
