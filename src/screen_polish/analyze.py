@@ -30,7 +30,7 @@ import numpy as np
 
 from .media import VideoInfo, frames
 
-ANALYSIS_WIDTH = 320
+ANALYSIS_WIDTH = 640  # at most; a 1080p screen's 14 px text still has strokes at a third of its size
 ANALYSIS_FPS = 8
 NOISE = 24  # a gray level change below this is compression noise
 CELL = 8  # analysis pixels per cell side
@@ -38,13 +38,16 @@ CELL_ACTIVE = 0.05  # share of a cell's pixels that must change for it to count
 GLOBAL = 0.30  # share of changed cells above which the whole screen changed
 MEMORY = 2.0  # seconds: a cell returning to a state seen this recently is reverting
 PERSIST = 0.5  # seconds: a new state still there this much later is persistent
+UNDO = 2.0  # seconds: a change undone within this long (the mouse resting on something, then moving on) is no anchor
 WINDOW, HOP = 1.5, 0.5  # seconds
 NEAR = 0.25  # a box this close to its segment (centre distance, share of the frame) continues it
 MIN_SEGMENT = 1.0  # seconds of activity for a zoom
 MIN_GAIN = 1.25  # zooms smaller than this are not worth the motion
 KEEP_ALIVE = 3.0  # seconds: passing changes keep a zoom going this long after its last persistent one
-EARLY_ANCHOR = 4  # cells: in the first MEMORY seconds (no history to recognise reverting changes), an anchor
-#                   must be at least this big, so the mouse moving away from where it started does not count
+EARLY_ANCHORS = 8  # cells: in the first MEMORY seconds there is no history to recognise reverting changes, and in
+#                    the last UNDO seconds no future to see a change undone, so a window there needs this many anchor
+#                    cells in all (typing adds up; the mouse leaving where it started, or resting at the end, does not)
+SEGMENT_ANCHORS = 3  # cells: what a zoom needs in all, so that one pointer-sized blip cannot start one
 
 
 @dataclass
@@ -77,13 +80,16 @@ class Zoom:
 
 def activity(path, info: VideoInfo, width: int = ANALYSIS_WIDTH, fps: float = ANALYSIS_FPS) -> Activity:
     """Streams the video once, keeping only the last few seconds of small frames in memory."""
+    width = max(CELL, min(width, info.width) // 2 * 2)  # never larger than the video itself
     height = max(CELL, round(width * info.height / info.width / 2) * 2)
     return classify(frames(path, width, height, fps, gray=True), fps, info.width, info.height)
 
 
 def classify(stream, fps: float, width: int, height: int) -> Activity:
     """The sorting described above, over a stream of small gray frames at `fps`."""
-    back, ahead = max(2, round(MEMORY * fps)), max(1, round(PERSIST * fps))
+    back = max(2, round(MEMORY * fps))
+    persist, undo = max(1, round(PERSIST * fps)), max(1, round(UNDO * fps))
+    ahead = max(persist, undo)
     buf: deque[np.ndarray] = deque(maxlen=back + 1 + ahead)
     times, grids, anchors, share = [], [], [], []
     rows = cols = 0
@@ -93,14 +99,22 @@ def classify(stream, fps: float, width: int, height: int) -> Activity:
         """Frame number j, at position pos in frames_ (the ones before it, and up to `ahead` after)."""
         f, prev = frames_[pos], frames_[pos - 1]
         changed = same_cells(f, prev, rows, cols, invert=True)
-        reverting = np.zeros_like(changed)
-        for old in frames_[: pos - 1]:
-            reverting |= same_cells(f, old, rows, cols)
-        persists = same_cells(frames_[min(len(frames_) - 1, pos + ahead)], f, rows, cols)
-        fresh = changed & ~reverting
-        anchor = fresh & persists
-        if j < back and anchor.sum() < EARLY_ANCHOR:
-            anchor = np.zeros_like(anchor)
+        fresh = np.zeros_like(changed)
+        anchor = np.zeros_like(changed)
+        idx = np.nonzero(changed)
+        if len(idx[0]):  # only the cells that changed are compared with the past and the future: few, usually
+            now, before = blocks(f, idx, rows, cols), blocks(prev, idx, rows, cols)
+            reverting = np.zeros(len(idx[0]), bool)
+            for old in frames_[: pos - 1]:
+                reverting |= same_blocks(now, blocks(old, idx, rows, cols))
+            persists = same_blocks(blocks(frames_[min(len(frames_) - 1, pos + persist)], idx, rows, cols), now)
+            undone = np.zeros(len(idx[0]), bool)
+            for later in frames_[pos + 1: pos + 1 + undo]:
+                undone |= same_blocks(blocks(later, idx, rows, cols), before)
+            fresh[idx] = ~reverting
+            anchor[idx] = ~reverting & persists & ~undone
+            if pos + undo >= len(frames_) and anchor.sum() < EARLY_ANCHORS:
+                anchor[:] = False  # the end of the video: no future to see it undone, so only a big change counts
         times.append(j / fps)
         grids.append(fresh)
         anchors.append(anchor)
@@ -131,6 +145,16 @@ def same_cells(a: np.ndarray, b: np.ndarray, rows: int, cols: int, invert: bool 
     return differs if invert else ~differs
 
 
+def blocks(img: np.ndarray, idx, rows: int, cols: int) -> np.ndarray:
+    """The pixels of the cells at idx (row and column arrays), as (n, CELL, CELL) int16."""
+    grid = img[: rows * CELL, : cols * CELL].reshape(rows, CELL, cols, CELL).transpose(0, 2, 1, 3)
+    return grid[idx].astype(np.int16)
+
+
+def same_blocks(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return (np.abs(a - b) > NOISE).mean(axis=(1, 2)) <= CELL_ACTIVE
+
+
 def add_clicks(act: Activity, clicks: list[dict]) -> None:
     """Clicks ({"t", "x", "y"} in source pixels) as anchors: a 3x3 block of cells around the point, for half
     a second, so that a click alone is enough for a zoom when the screen hardly changes."""
@@ -156,9 +180,14 @@ def plan(act: Activity, max_zoom: float = 2.0) -> list[Zoom]:
     while t <= duration:
         inside = (act.times >= t) & (act.times < t + WINDOW)
         box = None
+        early = inside & (act.times < MEMORY)  # no history yet: these count only when they add up
+        found = int(act.anchors[inside & ~early].sum())
+        found_early = int(act.anchors[early].sum())
+        anchored = found + (found_early if found_early >= EARLY_ANCHORS else 0) >= 1
         if inside.any() and not is_global[inside].any():
-            box = _box(act.grids[inside], rows, cols)
-        anchored = bool(act.anchors[inside].any()) if inside.any() else False
+            # Where: the persistent changes when there are some (stray noise elsewhere does not stretch the box),
+            # else everything that changed (a zoom kept going by passing changes follows them).
+            box = (_box(act.anchors[inside], rows, cols) if anchored else None) or _box(act.grids[inside], rows, cols)
         if anchored and current is not None:
             current["anchor"] = t + WINDOW
         alive = current is not None and t - current.get("anchor", current["start"] + WINDOW) < KEEP_ALIVE
@@ -180,7 +209,8 @@ def plan(act: Activity, max_zoom: float = 2.0) -> list[Zoom]:
         start, end = _trim(act, s["start"], s["end"])
         if zooms:  # windows overlap, so a segment can begin inside the last one: it starts where that ends
             start = max(start, zooms[-1].end)
-        if end - start < MIN_SEGMENT:
+        span = (act.times >= s["start"]) & (act.times < s["end"])  # counted once each: windows overlap
+        if end - start < MIN_SEGMENT or int(act.anchors[span].sum()) < SEGMENT_ANCHORS:
             continue
         z = _zoom_rect(s["box"], act.width, act.height, max_zoom)
         if z:

@@ -6,14 +6,16 @@ not shake from rounding) and one paste.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 from .camera import Camera
-from .media import Encoder, VideoInfo, frames
+from .media import Encoder, MediaError, VideoInfo, frames
 
 BACKGROUNDS = {  # name -> top-left and bottom-right colours of a diagonal gradient
     "midnight": ("#0f172a", "#4338ca"),
@@ -115,10 +117,14 @@ class Compositor:
 
 def render(path, out, info: VideoInfo, camera: Camera, style: Style, out_width: int | None = None, progress=None,
            crf: int = 18, preset: str = "medium") -> int:
-    """Writes the polished video to `out` (MP4) and returns the number of frames written."""
+    """Writes the polished video to `out` (MP4) and returns the number of frames written. It is written next
+    to `out` under another name and renamed when complete: a failed or interrupted run leaves no half file,
+    and does not replace a good one."""
     lay = layout(info, style, out_width)
     comp = Compositor(info, style, lay)
-    enc = Encoder(out, lay.out_w, lay.out_h, info.fps, audio_from=path if info.has_audio else None, crf=crf, preset=preset)
+    out = Path(out)
+    partial = out.with_name(f".{out.name}.partial")
+    enc = Encoder(partial, lay.out_w, lay.out_h, info.fps, audio_from=path if info.has_audio else None, crf=crf, preset=preset)
     n = 0
     try:
         for i, f in enumerate(frames(path, info.width, info.height, info.fps)):
@@ -127,8 +133,12 @@ def render(path, out, info: VideoInfo, camera: Camera, style: Style, out_width: 
             n += 1
             if progress:
                 progress(t)
+        if not n:
+            raise MediaError(f"{path}: no frames could be decoded")
+        enc.close()
+        os.replace(partial, out)
     except BaseException:
         enc.abort()
+        partial.unlink(missing_ok=True)
         raise
-    enc.close()
     return n

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import tempfile
@@ -32,34 +33,58 @@ def plan_to_json(zooms: list[Zoom], info, source: str, wide: list[float] | None 
             "zooms": [z.to_dict() for z in zooms], "wide": list(wide or [])}
 
 
-def plan_from_json(data: dict, info) -> tuple[list[Zoom], list[float]]:
+def _number(value, what: str, positive: bool = False) -> float:
+    """A finite number from JSON (not a string, not NaN or Infinity), or a plain error."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"{what} must be a number, not {value!r}")
+    if positive and value <= 0:
+        raise ValueError(f"{what} must be more than 0, not {value!r}")
+    return float(value)
+
+
+def plan_from_json(data, info) -> tuple[list[Zoom], list[float]]:
     """Zooms (and wide moments) from a plan file; a plan made for another size is scaled to this one."""
+    if not isinstance(data, dict):
+        raise ValueError("a plan is a JSON object with \"version\", \"source\" and \"zooms\"")
     if data.get("version") != PLAN_VERSION:
         raise ValueError(f"plan version {data.get('version')!r} is not {PLAN_VERSION}")
     src = data.get("source") or {}
-    sx = info.width / src.get("width", info.width)
-    sy = info.height / src.get("height", info.height)
+    if not isinstance(src, dict):
+        raise ValueError("\"source\" in the plan must be an object with the video's width and height")
+    sx = info.width / _number(src.get("width", info.width), "source width", positive=True)
+    sy = info.height / _number(src.get("height", info.height), "source height", positive=True)
+    items = data.get("zooms") or []
+    if not isinstance(items, list):
+        raise ValueError("\"zooms\" in the plan must be a list")
     zooms = []
-    for i, z in enumerate(data.get("zooms") or []):
+    for i, z in enumerate(items, 1):
+        if not isinstance(z, dict):
+            raise ValueError(f"zoom {i} in the plan must be an object with start, end, x, y, w, h")
         try:
-            zooms.append(Zoom(float(z["start"]), float(z["end"]), float(z["x"]) * sx, float(z["y"]) * sy, float(z["w"]) * sx,
-                              float(z["h"]) * sy, str(z.get("reason", "manual"))))
-        except (KeyError, TypeError, ValueError) as e:
-            raise ValueError(f"zoom {i + 1} in the plan: needs start, end, x, y, w, h numbers ({e})") from e
-        if zooms[-1].end <= zooms[-1].start or zooms[-1].w <= 0 or zooms[-1].h <= 0:
-            raise ValueError(f"zoom {i + 1} in the plan: end must be after start, and w and h positive")
-    try:
-        wide = sorted(float(w) for w in data.get("wide") or [])
-    except (TypeError, ValueError) as e:
-        raise ValueError(f"\"wide\" in the plan must be a list of times in seconds ({e})") from e
-    return sorted(zooms, key=lambda z: z.start), wide
+            v = {k: _number(z.get(k), f"zoom {i}: {k}", positive=k in ("w", "h")) for k in ("start", "end", "x", "y", "w", "h")}
+        except ValueError as e:
+            raise ValueError(f"{e} (each zoom needs start, end, x, y, w, h)") from None
+        if v["end"] <= v["start"]:
+            raise ValueError(f"zoom {i} in the plan: end must be after start")
+        zooms.append(Zoom(v["start"], v["end"], v["x"] * sx, v["y"] * sy, v["w"] * sx, v["h"] * sy, str(z.get("reason", "manual"))))
+    wide = data.get("wide") or []
+    if not isinstance(wide, list):
+        raise ValueError("\"wide\" in the plan must be a list of times in seconds")
+    return sorted(zooms, key=lambda z: z.start), sorted(_number(w, "a time in \"wide\"") for w in wide)
 
 
 def load_clicks(path: str) -> list[dict]:
     """A click log: {"clicks": [{"t": seconds, "x": px, "y": px}, ...]} or just the list."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     clicks = data.get("clicks", []) if isinstance(data, dict) else data
-    return [{"t": float(c["t"]), "x": float(c["x"]), "y": float(c["y"])} for c in clicks]
+    if not isinstance(clicks, list):
+        raise ValueError(f"{path}: the clicks must be a list of {{\"t\", \"x\", \"y\"}}")
+    out = []
+    for i, c in enumerate(clicks, 1):
+        if not isinstance(c, dict):
+            raise ValueError(f"{path}: click {i} must be an object with t, x, y")
+        out.append({k: _number(c.get(k), f"{path}: click {i}: {k}") for k in ("t", "x", "y")})
+    return out
 
 
 def _default_out(src: Path, gif: bool = False) -> Path:
@@ -105,7 +130,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         src = Path(args.input)
         info = probe(src)
-        style = Style(background=args.background, padding=max(0.0, args.padding) / 100, radius=max(0.0, args.radius) / 100,
+        if not 0 <= args.padding <= 40:
+            raise ValueError("--padding is a share of the width: 0 to 40")
+        if not 0 <= args.radius <= 20:
+            raise ValueError("--radius is a share of the width: 0 to 20")
+        if args.width is not None and not 16 <= args.width <= 7680:
+            raise ValueError("--width must be between 16 and 7680 pixels")
+        if not 1.0 <= args.max_zoom <= 8.0:
+            raise ValueError("--max-zoom must be between 1 and 8")
+        style = Style(background=args.background, padding=args.padding / 100, radius=args.radius / 100,
                       shadow=not args.no_shadow, frame=not args.no_frame)
         if style.background not in BACKGROUNDS:
             from .render import _color
@@ -132,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
             print("  no zoom: the activity is spread over the screen, or there is none", file=sys.stderr)
 
         if args.plan_out:
+            if Path(args.plan_out).resolve() == src.resolve():
+                raise ValueError("--plan-out would overwrite the input; choose another name")
             Path(args.plan_out).write_text(json.dumps(plan_to_json(zooms, info, str(src), wide), indent=2) + "\n", encoding="utf-8")
             print(f"  plan written to {args.plan_out}", file=sys.stderr)
             if not args.output:

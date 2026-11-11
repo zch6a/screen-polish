@@ -44,12 +44,13 @@ has no clicks in it. screen-polish works from what is in the video: where it cha
 
 ## How it decides where to look
 
-- The video is decoded small and gray, 8 frames a second, and each frame is compared with the one
-  before; changed pixels are pooled into cells, so that compression noise does not count.
+- The video is decoded small (at most 640 px wide) and gray, 8 frames a second, and each frame is
+  compared with the one before; changed pixels are pooled into cells, so that compression noise does not count.
 - **Not every change means "look here".** A change that goes back to how the screen looked a moment
   ago (a blinking caret, the mouse moving off something, a hover effect) is ignored. Only a change that
-  stays (typed text, a menu or dialog that opened, a value that changed) can start a zoom; passing
-  changes such as the mouse moving can keep a zoom going for a few seconds, never start one.
+  stays (typed text, a menu or dialog that opened, a value that changed) can start a zoom; the mouse
+  moving, or resting on something and moving on within 2 seconds, never does, though it can keep a
+  zoom going for a few seconds.
 - **Typing, a menu, a dialog, a value updating**: the change stays in one area. In sliding windows of
   1.5 seconds, the area where it happens becomes a box, and boxes that stay in the same place for at
   least a second become a zoom: the box with a margin, the video's aspect ratio, at most 2x
@@ -81,7 +82,7 @@ screen-polish demo.mp4 --no-zoom                # just the frame
 screen-polish demo.mp4 --width 1280 --quality draft
 ```
 
-The sound is kept as it is. Install the command with `uv tool install git+https://github.com/zch6a/screen-polish`
+The sound is kept (encoded as AAC; silence fills the end if it is shorter than the video). Install the command with `uv tool install git+https://github.com/zch6a/screen-polish`
 or `pip install "screen-polish @ git+https://github.com/zch6a/screen-polish"`. It needs Python 3.10+.
 The ffmpeg on your PATH is used; without one, the copy that comes with it (the `imageio-ffmpeg` package).
 

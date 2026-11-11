@@ -42,19 +42,26 @@ class Camera:
         leave: float | None = None  # when the current zoom would start zooming out
         wide = sorted(wide or [])
         for z in zooms:
-            view = self._clamp(View(z.x + z.w / 2, z.y + z.h / 2, z.w))
+            # The whole rectangle asked for: a plan may give one of another shape than the video.
+            view = self._clamp(View(z.x + z.w / 2, z.y + z.h / 2, max(z.w, z.h * self.aspect)))
             arrive = max(0.0, z.start - LEAD - transition)
-            cut = next((w for w in wide if leave is not None and leave - transition < w < z.start), None)
+            since = leave - transition if leave is not None else float("-inf")
+            cut = next((w for w in reversed(wide) if since < w < z.start), None)
             if cut is not None:
-                # Out to the whole screen by the time it changes (or as soon as the zoom allows), a moment there, then in.
-                out_at = max(shots[-1][0] + transition, min(leave, cut - transition))
-                shots.append((out_at, full))
-                arrive = max(arrive, out_at + transition + HOLD_WIDE)
+                if leave is not None:
+                    # Out to the whole screen by the time it changes (or as soon as the zoom allows) ...
+                    out_at = max(shots[-1][0] + transition, min(leave, cut - transition))
+                    shots.append((out_at, full))
+                    arrive = max(arrive, out_at + transition + HOLD_WIDE)
+                arrive = max(arrive, cut + HOLD_WIDE)  # ... and show it changed for a moment before zooming in
             elif leave is not None and arrive >= leave + 2 * transition:
                 shots.append((leave, full))  # enough time to zoom out and back in
             arrive = max(arrive, shots[-1][0] + transition)  # each move finishes before the next starts
             shots.append((arrive, view))
             leave = max(z.end + TAIL, arrive + transition)
+            after = next((w for w in wide if z.end <= w < leave + transition), None)
+            if after is not None:  # the whole screen changes soon after: be out by then, if the zoom allows
+                leave = max(z.end, arrive + transition, min(leave, after - transition))
         if leave is not None and zooms:
             # End on the whole screen: leave earlier if the video would stop mid-move (not before the activity ends).
             leave = max(min(leave, duration - transition), zooms[-1].end, shots[-1][0] + transition)

@@ -45,3 +45,27 @@ The synthetic menu was changed: its grey items had the same colour as the deskto
 **Tests**: 17 (+5): caret, wandering mouse, dark theme, a portrait phone recording (zooms one after the other, each a real zoom, together covering the field, no jumps), small text on a 4K screen (marked `slow`).
 
 An independent review is running; its findings go in part 2.
+
+## Round 1 — part 2: the independent review
+
+A reviewer who had not seen the code tried to break it with synthetic recordings (no real screen, no downloads), reproduced 14 of 15 findings, and left the scripts; all 15 are fixed, the reviewer's scripts were rerun against the fixed code, and `tests/test_review.py` holds 20 regression tests (15 fail on the code before the fixes; the other 5 pin what already worked).
+
+- **Audio shorter than the video failed the render** and left a cut file (`-shortest` stopped at the end of the sound). Now the sound is padded with silence (`apad`), so the video is never cut. The README said "the sound is kept as it is"; it is re-encoded to AAC, and now says so.
+- **Normal-size text was not seen at 1080p and above.** Analysing at 320 px wide averaged 14 px glyph strokes away, and the tests had used chunky blocks the size of 40 px text. Now the analysis runs at up to 640 px; to keep that cheap, the comparisons with the past and the future are done only for the cells that changed (under 1 ms a frame: about 20 s per hour of video). A test types real text in Pillow's 14 px font on a 1080p screen.
+- **A mouse that came to rest started zooms**: the cell under it showed a new picture that lasted. Now a change undone within the next 2 s (the mouse moving on) is no anchor; a zoom needs at least 3 anchor cells in all (counted once each, though the analysis windows overlap: a single 1-cell anchor had been counted three times); at the end of the video, where nothing can be seen undone, only big changes count.
+- **The length came from the container**: audio longer than the video, or a WebM recorded in a browser (no duration in the file), left the camera zoomed at the end. Now the video stream is measured (ffmpeg copies it to nowhere, no decoding) when the container's length is missing or disagrees.
+- **Variable frame rate** recordings were resampled to their average rate, dropping frames. Now to the timing rate when it is clearly higher (at most 60); 29.97 stays 29.97.
+- **The whole screen was shown on a change only between two zooms**, not before the first or after the last. Now always, as far as the activity allows.
+- **A plan's height was ignored**: a tall rectangle drawn by hand was cut off. Now the camera shows the whole rectangle.
+- **Typing in the first two seconds was missed** (an anchor there had to be big). Now anchors there count when they add up over the window. And a window's box now comes from its anchors when it has some, so that compression noise elsewhere (seen in a dark theme) does not stretch it.
+- **Colours**: frames went to YUV with the SD matrix and no tags; HD players assume BT.709 and shifted the colours. Now BT.709, tagged.
+- **A failed or interrupted render left a broken file**, and had already overwritten an earlier good one. Now it writes beside the output and renames when complete.
+- `--plan-out` could overwrite the input video; plans and click logs with the wrong types, NaN or Infinity crashed or were accepted; an MP3 with cover art produced an empty "video"; videos under 10 px were refused; `--padding 60` or `--width -50` produced a 2x2 picture. All checked now, with plain messages.
+
+The review also confirmed what already worked: a blinking caret, rotation metadata, paths with spaces, Chinese and emoji, bounded memory.
+
+**Tests**: 37 (+20). 1080p rendering is unchanged (20 s of 1080p30 in 24 s).
+
+**Open**
+- Real recordings: every test so far uses drawn ones. Public sample screencasts with clear licences would need to be downloaded, which needs the user's go-ahead.
+- Idle speed-up, vertical export.
