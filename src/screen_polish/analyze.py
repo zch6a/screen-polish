@@ -261,11 +261,17 @@ def _area(b) -> float:
 
 
 def _trim(act: Activity, start: float, end: float) -> tuple[float, float]:
-    """The first and last moment with activity in this segment."""
+    """From the first anchor in this segment (a stray change in the window before it is not the start) to the
+    last change of any kind (passing changes keep a zoom going)."""
     inside = (act.times >= start) & (act.times < end)
-    active = act.grids[inside].reshape(int(inside.sum()), -1).any(axis=1)
-    ts = act.times[inside][active]
-    return (float(ts[0]), float(ts[-1])) if len(ts) else (start, start)
+    n = int(inside.sum())
+    active = act.grids[inside].reshape(n, -1).any(axis=1)
+    anchored = act.anchors[inside].reshape(n, -1).any(axis=1)
+    ts, anchor_ts = act.times[inside][active], act.times[inside][anchored]
+    if not len(ts):
+        return start, start
+    first = float(anchor_ts[0]) if len(anchor_ts) else float(ts[0])
+    return first, float(ts[-1])
 
 
 def _zoom_rect(box, width: int, height: int, max_zoom: float):
