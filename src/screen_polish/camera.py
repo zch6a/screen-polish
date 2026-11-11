@@ -32,12 +32,14 @@ def ease(p: float) -> float:
 
 class Camera:
     def __init__(self, zooms, width: int, height: int, duration: float, transition: float = TRANSITION,
-                 wide: list[float] | None = None):
+                 wide: list[float] | None = None, aspect: float | None = None):
         """`wide`: moments when the whole screen changed; the camera shows all of it across them, even
-        between two zooms close in time."""
+        between two zooms close in time. `aspect`: the views' width / height when the output's differs from
+        the source's (9/16 for vertical); the whole screen then fits inside a view, with bars."""
         self.width, self.height, self.t = width, height, transition
-        self.aspect = width / height
-        full = View(width / 2, height / 2, float(width))
+        self.aspect = aspect or width / height
+        self.full_w = float(width) if self.aspect <= width / height else height * self.aspect
+        full = View(width / 2, height / 2, self.full_w)
         shots: list[tuple[float, View]] = [(0.0, full)]
         leave: float | None = None  # when the current zoom would start zooming out
         wide = sorted(wide or [])
@@ -70,10 +72,12 @@ class Camera:
         self.shots = shots
 
     def _clamp(self, v: View) -> View:
-        w = min(max(v.w, 1.0), float(self.width))
+        """No wider than the whole screen; inside the source where the view fits in it, centred on it where
+        it does not (a vertical view of a landscape screen is taller than the screen)."""
+        w = min(max(v.w, 1.0), self.full_w)
         h = w / self.aspect
-        cx = min(max(v.cx, w / 2), self.width - w / 2)
-        cy = min(max(v.cy, h / 2), self.height - h / 2)
+        cx = min(max(v.cx, w / 2), self.width - w / 2) if w <= self.width else self.width / 2
+        cy = min(max(v.cy, h / 2), self.height - h / 2) if h <= self.height else self.height / 2
         return View(cx, cy, w)
 
     def at(self, t: float) -> View:

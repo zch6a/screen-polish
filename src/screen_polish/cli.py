@@ -12,6 +12,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 import tempfile
 import time
@@ -105,6 +106,19 @@ def load_clicks(path: str) -> list[dict]:
     return out
 
 
+def parse_aspect(text: str) -> float | None:
+    """ "9:16" -> 0.5625; "source" -> None (the input's shape)."""
+    if text.strip().lower() in ("source", "input", ""):
+        return None
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*[:/x]\s*(\d+(?:\.\d+)?)\s*", text)
+    if not m or float(m.group(1)) <= 0 or float(m.group(2)) <= 0:
+        raise ValueError(f"--aspect: {text!r} is not a shape like 9:16")
+    value = float(m.group(1)) / float(m.group(2))
+    if not 0.2 <= value <= 5:
+        raise ValueError(f"--aspect: {text} is too narrow or too wide")
+    return value
+
+
 def _default_out(src: Path, gif: bool = False) -> Path:
     return src.with_name(src.stem + ".polished" + (".gif" if gif else ".mp4"))
 
@@ -144,6 +158,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-shadow", action="store_true")
     p.add_argument("--no-frame", action="store_true", help="no background, corners or shadow: the zoomed video edge to edge")
     p.add_argument("--width", type=int, help="output width in pixels (default: the input's)")
+    p.add_argument("--aspect", default="source", help="the output's shape: 9:16 (vertical: Shorts, Reels, TikTok), 1:1, 4:5, 16:9, "
+                   "or W:H (default: the input's)")
     p.add_argument("--quality", choices=["draft", "good", "best"], default="good", help="encoding speed and size (default good)")
     p.add_argument("--version", action="version", version=f"screen-polish {__version__}")
     args = p.parse_args(argv)
@@ -164,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
         if not 1.0 <= args.idle_min <= 600:
             raise ValueError("--idle-min must be between 1 and 600 seconds")
         style = Style(background=args.background, padding=args.padding / 100, radius=args.radius / 100,
-                      shadow=not args.no_shadow, frame=not args.no_frame)
+                      shadow=not args.no_shadow, frame=not args.no_frame, aspect=parse_aspect(args.aspect))
         if style.background not in BACKGROUNDS:
             from .render import _color
 
@@ -212,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         if out.resolve() == src.resolve():
             raise ValueError("the output would overwrite the input; choose another name with -o")
         crf, preset = {"draft": (24, "veryfast"), "good": (18, "medium"), "best": (15, "slow")}[args.quality]
-        camera = Camera(zooms, info.width, info.height, info.duration, wide=wide)
+        camera = Camera(zooms, info.width, info.height, info.duration, wide=wide, aspect=style.aspect)
         if out.suffix.lower() == ".gif":
             with tempfile.TemporaryDirectory() as tmp:
                 mp4 = Path(tmp) / "polished.mp4"

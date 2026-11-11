@@ -38,6 +38,7 @@ class Style:
     radius: float = 0.012  # corner radius, share of the output's width
     shadow: bool = True
     frame: bool = True  # False: the zoomed video alone, edge to edge
+    aspect: float | None = None  # width / height of the output (9/16 for vertical video); None: the source's
 
 
 def _color(s: str) -> tuple[int, int, int]:
@@ -72,16 +73,25 @@ class Layout:
 
 
 def layout(info: VideoInfo, style: Style, out_width: int | None = None) -> Layout:
-    out_w = even(out_width or info.width)
-    out_h = even(out_w * info.height / info.width)
+    """The output's size and where the video sits in it. With another aspect ratio than the source's, the
+    output keeps the source's longer side (a 1920x1080 recording made vertical is 1080x1920)."""
+    aspect = style.aspect or info.width / info.height
+    if out_width:
+        out_w = even(out_width)
+    elif style.aspect:
+        long_side = max(info.width, info.height)
+        out_w = even(long_side if aspect >= 1 else long_side * aspect)
+    else:
+        out_w = even(info.width)
+    out_h = even(out_w / aspect)
     if not style.frame:
         return Layout(out_w, out_h, out_w, out_h, 0, 0)
-    pad = style.padding * out_w
+    pad = style.padding * min(out_w, out_h) if style.aspect else style.padding * out_w
     inner_w = even(out_w - 2 * pad)
-    inner_h = even(inner_w * info.height / info.width)
+    inner_h = even(inner_w / aspect)
     if inner_h > out_h - 2 * pad:  # a tall video: the padding at top and bottom decides
         inner_h = even(out_h - 2 * pad)
-        inner_w = even(inner_h * info.width / info.height)
+        inner_w = even(inner_h * aspect)
     return Layout(out_w, out_h, inner_w, inner_h, (out_w - inner_w) // 2, (out_h - inner_h) // 2)
 
 
@@ -109,14 +119,38 @@ class Compositor:
 
     def frame(self, src: Image.Image, rect: tuple[float, float, float, float]) -> np.ndarray:
         lay = self.lay
-        # resize with a fractional box: separable, so about 5x faster than an affine transform at 1080p, and it
-        # filters properly when scaling down (the whole screen into the frame), where a transform aliases.
-        view = src.resize((lay.inner_w, lay.inner_h), Image.Resampling.BICUBIC, box=rect)
+        x0, y0, x1, y1 = rect
+        if x0 >= -0.01 and y0 >= -0.01 and x1 <= src.width + 0.01 and y1 <= src.height + 0.01:
+            # resize with a fractional box: separable, so about 5x faster than an affine transform at 1080p, and it
+            # filters properly when scaling down (the whole screen into the frame), where a transform aliases.
+            box = (max(0.0, x0), max(0.0, y0), min(float(src.width), x1), min(float(src.height), y1))
+            view = src.resize((lay.inner_w, lay.inner_h), Image.Resampling.BICUBIC, box=box)
+        else:
+            view = self._letterboxed(src, rect)
         if self.base is None:
             return np.asarray(view)
         out = self.base.copy()
         out.paste(view, (lay.left, lay.top), self.mask)
         return np.asarray(out)
+
+
+    def _letterboxed(self, src: Image.Image, rect) -> Image.Image:
+        """A view that reaches past the source (the whole of a landscape screen in a vertical frame): the part
+        that exists, scaled the same, on dark bars."""
+        lay = self.lay
+        x0, y0, x1, y1 = rect
+        sx, sy = lay.inner_w / (x1 - x0), lay.inner_h / (y1 - y0)
+        ix0, iy0, ix1, iy1 = max(0.0, x0), max(0.0, y0), min(float(src.width), x1), min(float(src.height), y1)
+        view = Image.new("RGB", (lay.inner_w, lay.inner_h), BARS)
+        if ix1 > ix0 and iy1 > iy0:
+            left, top = round((ix0 - x0) * sx), round((iy0 - y0) * sy)
+            w = max(1, min(lay.inner_w - left, round((ix1 - ix0) * sx)))
+            h = max(1, min(lay.inner_h - top, round((iy1 - iy0) * sy)))
+            view.paste(src.resize((w, h), Image.Resampling.BICUBIC, box=(ix0, iy0, ix1, iy1)), (left, top))
+        return view
+
+
+BARS = (17, 17, 17)  # what fills a view where there is no picture
 
 
 def prefetch(items, depth: int = 6):
