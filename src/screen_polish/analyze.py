@@ -47,6 +47,8 @@ KEEP_ALIVE = 3.0  # seconds: passing changes keep a zoom going this long after i
 EARLY_ANCHORS = 8  # cells: in the first MEMORY seconds there is no history to recognise reverting changes, and in
 #                    the last UNDO seconds no future to see a change undone, so a window there needs this many anchor
 #                    cells in all (typing adds up; the mouse leaving where it started, or resting at the end, does not)
+SETTLE = 0.5  # seconds: nothing in the first half second starts a zoom (seen: the first frames of an encode differing
+#              in a hundred scattered cells with one build of ffmpeg; and recorders' countdowns disappear then)
 SEGMENT_ANCHORS = 3  # cells: what a zoom needs in all, so that one pointer-sized blip cannot start one
 
 
@@ -115,6 +117,8 @@ def classify(stream, fps: float, width: int, height: int) -> Activity:
             anchor[idx] = ~reverting & persists & ~undone
             if pos + undo >= len(frames_) and anchor.sum() < EARLY_ANCHORS:
                 anchor[:] = False  # the end of the video: no future to see it undone, so only a big change counts
+            if j / fps < SETTLE:
+                anchor[:] = False  # the recording settling: the recorder's own countdown leaving, the encoder's first frames
         times.append(j / fps)
         grids.append(fresh)
         anchors.append(anchor)
