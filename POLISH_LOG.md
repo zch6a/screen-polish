@@ -69,3 +69,11 @@ The review also confirmed what already worked: a blinking caret, rotation metada
 **Open**
 - Real recordings: every test so far uses drawn ones. Public sample screencasts with clear licences would need to be downloaded, which needs the user's go-ahead.
 - Idle speed-up, vertical export.
+
+## Round 1 — part 3: what macOS showed
+
+CI failed on macOS only, after part 2: the wandering and resting mouse each got a zoom, the dark theme's first zoom started a second early. Worse encodes on Windows did not reproduce it, so a temporary branch ran a diagnostic on the macOS runner (ffmpeg 9.0 from imageio-ffmpeg):
+- the second frame of an encode differed from the first in about a hundred scattered cells, 65 of them taken as anchors: a zoom at 0.1 s. Now nothing in the first half second can start a zoom; real recordings settle then too (a recorder's countdown or toolbar disappearing).
+- ten noise cells changed a second before the typing, inside the window that held the typing, and the zoom started at the noise. Now a zoom starts at its first anchor; it still ends at its last change of any kind.
+
+These are real-recording problems that the clean synthetic videos on Windows hid; CI on three systems found them. All six jobs pass now.
