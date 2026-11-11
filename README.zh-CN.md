@@ -54,6 +54,7 @@ screen-polish demo.mp4 --padding 4 --radius 2   # 占宽度的百分比
 screen-polish demo.mp4 --no-frame               # 只要放大，铺满画面
 screen-polish demo.mp4 --no-zoom                # 只要背景和边框
 screen-polish demo.mp4 --speed-idle 4           # 静止片段（2 秒以上）四倍速播放
+screen-polish demo.mp4 --aspect 9:16            # 竖屏，用于 Shorts、Reels、抖音（也可以 1:1、4:5、宽:高）
 screen-polish demo.mp4 --width 1280 --quality draft
 ```
 
@@ -63,7 +64,8 @@ screen-polish demo.mp4 --width 1280 --quality draft
 
 - **鼠标指针保持录制时的样子**：它是画面的一部分，事后去不掉，也没法让它变平滑。能隐藏并记录指针的录屏软件（Screen Studio 之类）才做得到。
 - **一直在变的东西会吸引镜头**：角落里在播放的视频、动画广告、实时图表。选错地方时，修改放大方案即可。
-- 还不能加字幕，也不能导出竖屏（9:16）。
+- **竖屏视频显示的区域和横屏的放大一样**：整个屏幕放在上下黑边之间；放大时画面占得更满，但上下仍有黑边。要裁得更紧、铺满竖屏，需要知道动作区域本身的大小，暂时还没做。
+- 还不能加字幕。
 - 速度：1080p 比实时略快（在 i9-12900H 笔记本上，20 秒的 1080p30 渲染用了 19 秒）。
 
 ## 隐私

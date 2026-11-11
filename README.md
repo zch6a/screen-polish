@@ -80,6 +80,7 @@ screen-polish demo.mp4 --padding 4 --radius 2   # % of the width
 screen-polish demo.mp4 --no-frame               # just the zooms, edge to edge
 screen-polish demo.mp4 --no-zoom                # just the frame
 screen-polish demo.mp4 --speed-idle 4           # still stretches (2 s or more) four times as fast
+screen-polish demo.mp4 --aspect 9:16            # vertical, for Shorts, Reels, TikTok (also 1:1, 4:5, W:H)
 screen-polish demo.mp4 --width 1280 --quality draft
 ```
 
@@ -96,7 +97,10 @@ The ffmpeg on your PATH is used; without one, the copy that comes with it (the `
   of the picture. Recorders that hide it and log it (Screen Studio and the like) can do that.
 - **Anything that keeps changing draws the camera**: a video playing in a corner, an animated ad, a
   live chart. When it picks the wrong place, edit the plan.
-- No captions, no vertical (9:16) export yet.
+- **Vertical video shows the same area as the landscape zooms**: the whole screen sits between dark
+  bars, and a zoom fills more of the frame but keeps bars above and below. A tighter vertical crop that
+  fills the frame would need the size of the activity itself; not yet.
+- No captions yet.
 - Speed: a little faster than real time for 1080p on a laptop (20 s of 1080p30 rendered in 19 s on an
   i9-12900H).
 

@@ -92,3 +92,13 @@ Checked on a 16 s recording ending in 6.5 still seconds: one stretch, 10.1–15.
 - Real recordings (downloading public samples needs the user's go-ahead; asked).
 - Vertical (9:16) export: the camera would need views of another aspect than the source, and a "whole screen" view letterboxed inside them.
 - A second independent review, of rounds 1 and 2.
+
+## Round 3 — 2026-11-12 (part 1: vertical video)
+
+**`--aspect 9:16`** (also 1:1, 4:5, any W:H) for Shorts, Reels and TikTok. The canvas takes that shape, keeping the source's longer side (1920x1080 becomes 1080x1920); padding is a share of its shorter side. The camera's views take the canvas's shape; the "whole screen" view of a landscape recording in a vertical frame is the full width, taller than the screen, so the part with no picture is drawn as dark bars inside the frame (a view is clamped inside the source where it fits, centred on it where it does not). Views fully inside the source take the fast path as before.
+
+Looked at on a contact sheet of the demo made vertical: the whole screen between bars at the start, the zooms on the field and the menu, out again at the end. A known limit, said in the README: a vertical zoom shows the same area as the landscape one, so bars stay above and below; cropping tighter to fill the frame needs the size of the activity itself, which the plan does not keep.
+
+**Tests**: 45 (+4): parsing and checking shapes, the layout (long side kept, `--width`), the camera's whole-screen view in a vertical frame, a rendered vertical video (360x640, bars above the screen, the screen in the middle, a zoom cutting the bars from about two thirds of the frame to under half).
+
+A second independent review (of rounds 1–3) is running; its findings go in part 2.
