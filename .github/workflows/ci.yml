@@ -1,0 +1,25 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3; it has no moving major tag
+        with:
+          python-version: ${{ matrix.python }}
+          activate-environment: true
+      - run: uv pip install -e . pytest ruff
+      # With the ffmpeg that comes with the package, not the runner's: what a user without ffmpeg gets.
+      - name: pytest (bundled ffmpeg)
+        shell: bash
+        run: |
+          export SCREEN_POLISH_FFMPEG="$(uv run --no-project python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
+          echo "ffmpeg: $SCREEN_POLISH_FFMPEG"
+          uv run --no-project pytest -q
+      - run: uv run --no-project ruff check src tests
