@@ -22,15 +22,17 @@ from .analyze import Zoom, activity, add_clicks, plan, wide_moments
 from .camera import Camera
 from .media import MediaError, probe, to_gif
 from .render import BACKGROUNDS, Style, render
+from .timeline import Speedup, Timeline, idle_stretches
 
 PLAN_VERSION = 1
 
 
-def plan_to_json(zooms: list[Zoom], info, source: str, wide: list[float] | None = None) -> dict:
-    """`wide`: the moments the whole screen changed, when the camera shows all of it."""
+def plan_to_json(zooms: list[Zoom], info, source: str, wide: list[float] | None = None, speedups: list[Speedup] | None = None) -> dict:
+    """`wide`: the moments the whole screen changed, when the camera shows all of it; `speed`: the stretches
+    played faster (start, end in source seconds, and factor)."""
     return {"version": PLAN_VERSION, "source": {"file": Path(source).name, "width": info.width, "height": info.height,
                                                 "duration": round(info.duration, 3)},
-            "zooms": [z.to_dict() for z in zooms], "wide": list(wide or [])}
+            "zooms": [z.to_dict() for z in zooms], "wide": list(wide or []), "speed": [s.to_dict() for s in speedups or []]}
 
 
 def _number(value, what: str, positive: bool = False) -> float:
@@ -71,6 +73,22 @@ def plan_from_json(data, info) -> tuple[list[Zoom], list[float]]:
     if not isinstance(wide, list):
         raise ValueError("\"wide\" in the plan must be a list of times in seconds")
     return sorted(zooms, key=lambda z: z.start), sorted(_number(w, "a time in \"wide\"") for w in wide)
+
+
+def speedups_from_json(data) -> list[Speedup]:
+    """The "speed" list of a plan: stretches played faster, factor 1 to 16."""
+    items = data.get("speed") or [] if isinstance(data, dict) else []
+    if not isinstance(items, list):
+        raise ValueError("\"speed\" in the plan must be a list of {\"start\", \"end\", \"factor\"}")
+    out = []
+    for i, s in enumerate(items, 1):
+        if not isinstance(s, dict):
+            raise ValueError(f"speed-up {i} in the plan must be an object with start, end, factor")
+        v = {k: _number(s.get(k), f"speed-up {i}: {k}") for k in ("start", "end", "factor")}
+        if v["end"] <= v["start"] or not 1 <= v["factor"] <= 16:
+            raise ValueError(f"speed-up {i} in the plan: end must be after start, and the factor between 1 and 16")
+        out.append(Speedup(v["start"], v["end"], v["factor"]))
+    return sorted(out, key=lambda s: s.start)
 
 
 def load_clicks(path: str) -> list[dict]:
@@ -117,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--clicks", metavar="JSON", help="a click log ({\"clicks\": [{\"t\", \"x\", \"y\"}]}) to zoom on, besides the activity")
     p.add_argument("--max-zoom", type=float, default=2.0, help="how far to zoom in at most (default 2.0)")
     p.add_argument("--no-zoom", action="store_true", help="only frame the video")
+    p.add_argument("--speed-idle", type=float, metavar="FACTOR", help="play stretches where nothing changes this many times as fast "
+                   "(e.g. 4); their sound too, pitch kept")
+    p.add_argument("--idle-min", type=float, default=2.0, metavar="SECONDS", help="how long a stretch must be still to be sped up (default 2)")
     p.add_argument("--background", default="midnight", help=f"{', '.join(BACKGROUNDS)}, or a colour #rrggbb (default midnight)")
     p.add_argument("--padding", type=float, default=6.0, help="space around the video, %% of the width (default 6)")
     p.add_argument("--radius", type=float, default=1.2, help="corner radius, %% of the width (default 1.2)")
@@ -138,6 +159,10 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--width must be between 16 and 7680 pixels")
         if not 1.0 <= args.max_zoom <= 8.0:
             raise ValueError("--max-zoom must be between 1 and 8")
+        if args.speed_idle is not None and not 1.0 < args.speed_idle <= 16.0:
+            raise ValueError("--speed-idle must be more than 1 and at most 16")
+        if not 1.0 <= args.idle_min <= 600:
+            raise ValueError("--idle-min must be between 1 and 600 seconds")
         style = Style(background=args.background, padding=args.padding / 100, radius=args.radius / 100,
                       shadow=not args.no_shadow, frame=not args.no_frame)
         if style.background not in BACKGROUNDS:
@@ -148,26 +173,37 @@ def main(argv: list[str] | None = None) -> int:
               f"{', with audio' if info.has_audio else ''}", file=sys.stderr)
 
         wide: list[float] = []
-        if args.no_zoom:
-            zooms: list[Zoom] = []
-        elif args.plan:
-            zooms, wide = plan_from_json(json.loads(Path(args.plan).read_text(encoding="utf-8")), info)
-        else:
+        zooms: list[Zoom] = []
+        speedups: list[Speedup] = []
+        if args.plan:
+            data = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+            zooms, wide = plan_from_json(data, info)
+            speedups = speedups_from_json(data)
+            if args.no_zoom:
+                zooms = []
+        elif not args.no_zoom or args.speed_idle:
             print("  finding where things happen ...", file=sys.stderr)
             act = activity(src, info)
             wide = wide_moments(act)
+            if args.speed_idle:
+                speedups = idle_stretches(act, factor=args.speed_idle, min_idle=args.idle_min)  # before the clicks are added
             if args.clicks:
                 add_clicks(act, load_clicks(args.clicks))
-            zooms = plan(act, max_zoom=max(1.0, args.max_zoom))
+            if not args.no_zoom:
+                zooms = plan(act, max_zoom=max(1.0, args.max_zoom))
         for z in zooms:
             print(f"  zoom {z.start:6.1f}-{z.end:6.1f} s  {info.width / z.w:.1f}x on ({z.x:.0f}, {z.y:.0f}) {z.w:.0f}x{z.h:.0f}", file=sys.stderr)
         if not zooms and not args.no_zoom:
             print("  no zoom: the activity is spread over the screen, or there is none", file=sys.stderr)
+        timeline = Timeline(speedups, info.duration)
+        if timeline.sped:
+            print(f"  {len(speedups)} still stretch{'es' if len(speedups) != 1 else ''} sped up: {info.duration:.1f} s becomes "
+                  f"{timeline.out_duration():.1f} s", file=sys.stderr)
 
         if args.plan_out:
             if Path(args.plan_out).resolve() == src.resolve():
                 raise ValueError("--plan-out would overwrite the input; choose another name")
-            Path(args.plan_out).write_text(json.dumps(plan_to_json(zooms, info, str(src), wide), indent=2) + "\n", encoding="utf-8")
+            Path(args.plan_out).write_text(json.dumps(plan_to_json(zooms, info, str(src), wide, speedups), indent=2) + "\n", encoding="utf-8")
             print(f"  plan written to {args.plan_out}", file=sys.stderr)
             if not args.output:
                 return 0
@@ -180,11 +216,11 @@ def main(argv: list[str] | None = None) -> int:
         if out.suffix.lower() == ".gif":
             with tempfile.TemporaryDirectory() as tmp:
                 mp4 = Path(tmp) / "polished.mp4"
-                render(src, mp4, info, camera, style, args.width, _progress(info.duration), crf=crf, preset="veryfast")
+                render(src, mp4, info, camera, style, args.width, _progress(info.duration), crf=crf, preset="veryfast", timeline=timeline)
                 print("\n  making the GIF ...", file=sys.stderr)
                 to_gif(mp4, out)
         else:
-            render(src, out, info, camera, style, args.width, _progress(info.duration), crf=crf, preset=preset)
+            render(src, out, info, camera, style, args.width, _progress(info.duration), crf=crf, preset=preset, timeline=timeline)
             print(file=sys.stderr)
         print(f"  wrote {out} ({os.path.getsize(out) / 2**20:.1f} MB)", file=sys.stderr)
         return 0

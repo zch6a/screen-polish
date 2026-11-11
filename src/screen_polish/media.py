@@ -131,10 +131,14 @@ class Encoder:
     """Frames in (RGB, uint8), an H.264 MP4 out, with the source's audio copied alongside."""
 
     def __init__(self, out: str | Path, width: int, height: int, fps: float, audio_from: str | Path | None = None,
-                 crf: int = 18, preset: str = "medium"):
+                 crf: int = 18, preset: str = "medium", audio_graph: str | None = None):
+        """`audio_graph`: a filter graph from the source's audio ([1:a:0]) to [aout], when the timing changes."""
         cmd = [ffmpeg_exe(), "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", f"{fps}",
                "-i", "-"]
-        if audio_from:
+        if audio_from and audio_graph:
+            cmd += ["-i", str(audio_from), "-filter_complex", audio_graph, "-map", "0:v", "-map", "[aout]",
+                    "-c:a", "aac", "-b:a", "192k", "-shortest"]
+        elif audio_from:
             # apad: audio shorter than the video is padded with silence, so the video is not cut where the sound
             # ends; -shortest then ends both with the video.
             cmd += ["-i", str(audio_from), "-map", "0:v", "-map", "1:a:0?", "-af", "apad", "-c:a", "aac", "-b:a", "192k", "-shortest"]

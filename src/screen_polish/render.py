@@ -6,8 +6,11 @@ not shake from rounding) and one paste.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import queue
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +19,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 from .camera import Camera
 from .media import Encoder, MediaError, VideoInfo, frames
+from .timeline import Timeline
 
 BACKGROUNDS = {  # name -> top-left and bottom-right colours of a diagonal gradient
     "midnight": ("#0f172a", "#4338ca"),
@@ -115,22 +119,73 @@ class Compositor:
         return np.asarray(out)
 
 
+def prefetch(items, depth: int = 6):
+    """Runs a generator in a thread, `depth` items ahead: decoding the next frames (reading ffmpeg's pipe,
+    which releases the GIL) overlaps drawing this one. Errors are raised here, in order."""
+    q: queue.Queue = queue.Queue(maxsize=depth)
+    done = object()
+    stop = threading.Event()
+
+    def work():
+        try:
+            for item in items:
+                while not stop.is_set():
+                    try:
+                        q.put(item, timeout=0.2)
+                        break
+                    except queue.Full:
+                        continue
+                if stop.is_set():
+                    break
+            q.put(done)
+        except BaseException as e:  # noqa: BLE001 - handed to the consumer
+            q.put(e)
+
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    try:
+        while True:
+            item = q.get()
+            if item is done:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+    finally:
+        stop.set()  # the consumer stopped early: let the worker end (and close the generator, which stops ffmpeg)
+        while thread.is_alive():
+            with contextlib.suppress(queue.Empty):
+                q.get(timeout=0.1)
+        thread.join()
+        close = getattr(items, "close", None)
+        if close:
+            close()
+
+
 def render(path, out, info: VideoInfo, camera: Camera, style: Style, out_width: int | None = None, progress=None,
-           crf: int = 18, preset: str = "medium") -> int:
+           crf: int = 18, preset: str = "medium", timeline: Timeline | None = None) -> int:
     """Writes the polished video to `out` (MP4) and returns the number of frames written. It is written next
     to `out` under another name and renamed when complete: a failed or interrupted run leaves no half file,
-    and does not replace a good one."""
+    and does not replace a good one. With a timeline, the sped-up stretches keep only the frames they need."""
     lay = layout(info, style, out_width)
     comp = Compositor(info, style, lay)
     out = Path(out)
     partial = out.with_name(f".{out.name}.partial")
-    enc = Encoder(partial, lay.out_w, lay.out_h, info.fps, audio_from=path if info.has_audio else None, crf=crf, preset=preset)
+    graph = timeline.audio_graph() if timeline and timeline.sped and info.has_audio else None
+    enc = Encoder(partial, lay.out_w, lay.out_h, info.fps, audio_from=path if info.has_audio else None, crf=crf, preset=preset,
+                  audio_graph=graph)
     n = 0
+    clock = 0.0  # output seconds so far
     try:
-        for i, f in enumerate(frames(path, info.width, info.height, info.fps)):
+        for i, f in enumerate(prefetch(frames(path, info.width, info.height, info.fps))):
             t = i / info.fps
-            enc.write(comp.frame(Image.fromarray(f, "RGB"), camera.rect(t)))
-            n += 1
+            clock += 1 / (info.fps * (timeline.speed_at(t) if timeline else 1.0))
+            want = round(clock * info.fps)  # output frames that should exist by now
+            if want > n:
+                frame = comp.frame(Image.fromarray(f, "RGB"), camera.rect(t))
+                while n < want:
+                    enc.write(frame)
+                    n += 1
             if progress:
                 progress(t)
         if not n:

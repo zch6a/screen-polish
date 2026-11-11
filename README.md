@@ -79,10 +79,14 @@ screen-polish demo.mp4 --background ocean       # midnight, ocean, sunset, fores
 screen-polish demo.mp4 --padding 4 --radius 2   # % of the width
 screen-polish demo.mp4 --no-frame               # just the zooms, edge to edge
 screen-polish demo.mp4 --no-zoom                # just the frame
+screen-polish demo.mp4 --speed-idle 4           # still stretches (2 s or more) four times as fast
 screen-polish demo.mp4 --width 1280 --quality draft
 ```
 
-The sound is kept (encoded as AAC; silence fills the end if it is shorter than the video). Install the command with `uv tool install git+https://github.com/zch6a/screen-polish`
+The sound is kept (encoded as AAC; silence fills the end if it is shorter than the video). With
+`--speed-idle`, the sound of a sped-up stretch is sped up too, keeping its pitch: if you talk over a still
+screen, that talk is fast too, which is why it is off unless asked for. The stretches go into the plan
+(`"speed"`), so you can remove or change them there. Install the command with `uv tool install git+https://github.com/zch6a/screen-polish`
 or `pip install "screen-polish @ git+https://github.com/zch6a/screen-polish"`. It needs Python 3.10+.
 The ffmpeg on your PATH is used; without one, the copy that comes with it (the `imageio-ffmpeg` package).
 
@@ -92,8 +96,9 @@ The ffmpeg on your PATH is used; without one, the copy that comes with it (the `
   of the picture. Recorders that hide it and log it (Screen Studio and the like) can do that.
 - **Anything that keeps changing draws the camera**: a video playing in a corner, an animated ad, a
   live chart. When it picks the wrong place, edit the plan.
-- No speeding up of idle stretches, no captions, no vertical (9:16) export yet.
-- Speed: about real time for 1080p on a laptop (20 s of 1080p30 rendered in 25 s on an i9-12900H).
+- No captions, no vertical (9:16) export yet.
+- Speed: a little faster than real time for 1080p on a laptop (20 s of 1080p30 rendered in 19 s on an
+  i9-12900H).
 
 ## Privacy
 

@@ -77,3 +77,18 @@ CI failed on macOS only, after part 2: the wandering and resting mouse each got 
 - ten noise cells changed a second before the typing, inside the window that held the typing, and the zoom started at the noise. Now a zoom starts at its first anchor; it still ends at its last change of any kind.
 
 These are real-recording problems that the clean synthetic videos on Windows hid; CI on three systems found them. All six jobs pass now.
+
+## Round 2 — 2026-11-12
+
+**Speeding up still stretches** (`--speed-idle FACTOR`, `--idle-min SECONDS`, default 2). A moment is still when no cell changed in a way that counts (a blinking caret or a spinner returning to the same picture does not count, as for zooms) and the whole screen did not change. A run of still moments at least 2 s long is played FACTOR times as fast, keeping half a second at normal speed at each end so the change of pace is not abrupt. Frames the output does not need are not drawn at all. The sound is cut into the same parts (`asplit`, `atrim`), the fast parts sped up with `atempo` (pitch kept; chained in factors of 2 for older ffmpeg builds), joined, and padded. Narration over a still screen gets fast too, so it is off unless asked for, and the README says so. The stretches go into the plan as `"speed"` (validated: end after start, factor 1 to 16), so they can be edited or removed and reused with `--plan`.
+
+Checked on a 16 s recording ending in 6.5 still seconds: one stretch, 10.1–15.4 s at 4x, 16.0 s becomes 12.1 s, the sound ending with the video. The 11 s demo gets none (its still parts are all under 2 s), a blinking caret counts as still.
+
+**Faster rendering**: decoding now runs in a thread a few frames ahead of drawing (reading ffmpeg's pipe releases the GIL), so the two overlap: 20 s of 1080p30 in 18.5 s instead of 24 s. Stopping early (an error, Ctrl+C) stops the thread and ffmpeg; the interrupted-render test still passes.
+
+**Tests**: 41 (+4): the timeline's arithmetic (overlapping speed-ups clipped), the audio graph, which stretches are sped up, the sound in step with the shorter video (the container's duration matches the video's), plans with speed-ups used again, `--no-zoom` with speed-ups, bad values.
+
+**Open**
+- Real recordings (downloading public samples needs the user's go-ahead; asked).
+- Vertical (9:16) export: the camera would need views of another aspect than the source, and a "whole screen" view letterboxed inside them.
+- A second independent review, of rounds 1 and 2.

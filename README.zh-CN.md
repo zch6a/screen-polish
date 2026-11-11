@@ -53,17 +53,18 @@ screen-polish demo.mp4 --background ocean       # midnight、ocean、sunset、fo
 screen-polish demo.mp4 --padding 4 --radius 2   # 占宽度的百分比
 screen-polish demo.mp4 --no-frame               # 只要放大，铺满画面
 screen-polish demo.mp4 --no-zoom                # 只要背景和边框
+screen-polish demo.mp4 --speed-idle 4           # 静止片段（2 秒以上）四倍速播放
 screen-polish demo.mp4 --width 1280 --quality draft
 ```
 
-声音会保留（编码为 AAC；比视频短时，结尾用静音补齐）。安装成命令：`uv tool install git+https://github.com/zch6a/screen-polish`，或 `pip install "screen-polish @ git+https://github.com/zch6a/screen-polish"`。需要 Python 3.10+。PATH 上有 ffmpeg 就用它；没有的话，用随包一起装上的那份（`imageio-ffmpeg`）。
+声音会保留（编码为 AAC；比视频短时，结尾用静音补齐）。使用 `--speed-idle` 时，加速片段的声音也会一起加速（音调不变）：如果你在静止画面上说话，那段话也会变快，所以默认不开。加速的片段会写进放大方案（`"speed"`），可以在那里删除或修改。安装成命令：`uv tool install git+https://github.com/zch6a/screen-polish`，或 `pip install "screen-polish @ git+https://github.com/zch6a/screen-polish"`。需要 Python 3.10+。PATH 上有 ffmpeg 就用它；没有的话，用随包一起装上的那份（`imageio-ffmpeg`）。
 
 ## 它（暂时）做不到的
 
 - **鼠标指针保持录制时的样子**：它是画面的一部分，事后去不掉，也没法让它变平滑。能隐藏并记录指针的录屏软件（Screen Studio 之类）才做得到。
 - **一直在变的东西会吸引镜头**：角落里在播放的视频、动画广告、实时图表。选错地方时，修改放大方案即可。
-- 还不能加速空闲片段、加字幕，也不能导出竖屏（9:16）。
-- 速度：1080p 大约实时（在 i9-12900H 笔记本上，20 秒的 1080p30 渲染用了 25 秒）。
+- 还不能加字幕，也不能导出竖屏（9:16）。
+- 速度：1080p 比实时略快（在 i9-12900H 笔记本上，20 秒的 1080p30 渲染用了 19 秒）。
 
 ## 隐私
 
