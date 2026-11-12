@@ -24,7 +24,7 @@ def test_the_timeline_maps_source_to_output():
     assert [(p.start, p.end, p.factor) for p in tl.parts] == [(0.0, 2.0, 1.0), (2.0, 6.0, 4.0), (6.0, 10.0, 1.0)]
     assert tl.out_duration() == pytest.approx(2 + 4 / 4 + 4) and tl.speed_at(3.0) == 4.0 and tl.speed_at(7.0) == 1.0
     graph = tl.audio_graph()
-    assert graph.startswith("[1:a:0]asplit=3") and "atempo=2,atempo=2" in graph and graph.endswith("concat=n=3:v=0:a=1,apad[aout]")
+    assert graph.startswith("[1:a:0]aresample=async=1:first_pts=0,asplit=3") and "atempo=2,atempo=2" in graph and graph.endswith("concat=n=3:v=0:a=1,apad[aout]")
     assert not Timeline([], 10.0).sped
     overlapping = Timeline([Speedup(2, 6, 4), Speedup(5, 8, 2), Speedup(9, 12, 3)], 10.0)
     assert [(p.start, p.end) for p in overlapping.parts] == [(0, 2), (2, 6), (6, 8), (8, 9), (9, 10)], "clipped, never overlapping"
@@ -44,11 +44,13 @@ def test_a_sped_up_video_keeps_its_sound_in_step(long_demo, tmp_path):
     plan = tmp_path / "plan.json"
     assert cli.main([str(long_demo), "-o", str(out), "--speed-idle", "4", "--quality", "draft", "--plan-out", str(plan)]) == 0
     info = probe(out)
-    assert info.has_audio and abs(info.duration - (16 - 5.25 * 0.75)) < 0.3
+    data = json.loads(plan.read_text(encoding="utf-8"))
+    sped = data["speed"][0]
+    assert sped["start"] >= 11.0, "the last zoom-out (9.5 + 0.8 s, taking 0.8 s) stays at normal speed"
+    assert info.has_audio and abs(info.duration - (16 - (sped["end"] - sped["start"]) * 0.75)) < 0.3
     banner = subprocess.run([ffmpeg_exe(), "-hide_banner", "-i", str(out)], capture_output=True, text=True).stderr
     h, m, s = re.search(r"Duration: (\d+):(\d+):([\d.]+)", banner).groups()
     assert abs(int(h) * 3600 + int(m) * 60 + float(s) - info.duration) < 0.3, "the sound does not run on past the video"
-    data = json.loads(plan.read_text(encoding="utf-8"))
     assert len(data["speed"]) == 1 and data["speed"][0]["factor"] == 4.0
     again = tmp_path / "again.mp4"
     assert cli.main([str(long_demo), "--plan", str(plan), "-o", str(again), "--quality", "draft"]) == 0

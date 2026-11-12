@@ -86,7 +86,7 @@ def layout(info: VideoInfo, style: Style, out_width: int | None = None) -> Layou
     out_h = even(out_w / aspect)
     if not style.frame:
         return Layout(out_w, out_h, out_w, out_h, 0, 0)
-    pad = style.padding * min(out_w, out_h) if style.aspect else style.padding * out_w
+    pad = style.padding * out_w  # a share of the width, whatever the shape (as --help says)
     inner_w = even(out_w - 2 * pad)
     inner_h = even(inner_w / aspect)
     if inner_h > out_h - 2 * pad:  # a tall video: the padding at top and bottom decides
@@ -205,9 +205,9 @@ def render(path, out, info: VideoInfo, camera: Camera, style: Style, out_width: 
     comp = Compositor(info, style, lay)
     out = Path(out)
     partial = out.with_name(f".{out.name}.partial")
-    graph = timeline.audio_graph() if timeline and timeline.sped and info.has_audio else None
+    graph = timeline.audio_graph(video_start=info.video_start) if timeline and timeline.sped and info.has_audio else None
     enc = Encoder(partial, lay.out_w, lay.out_h, info.fps, audio_from=path if info.has_audio else None, crf=crf, preset=preset,
-                  audio_graph=graph)
+                  audio_graph=graph, video_start=info.video_start)
     n = 0
     clock = 0.0  # output seconds so far
     try:

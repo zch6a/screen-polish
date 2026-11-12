@@ -37,6 +37,8 @@ class Camera:
         between two zooms close in time. `aspect`: the views' width / height when the output's differs from
         the source's (9/16 for vertical); the whole screen then fits inside a view, with bars."""
         self.width, self.height, self.t = width, height, transition
+        if aspect and abs(aspect / (width / height) - 1) < 0.005:
+            aspect = None  # within half a percent of the source's shape (1081x1920 as 9:16): no hairline bars
         self.aspect = aspect or width / height
         self.full_w = float(width) if self.aspect <= width / height else height * self.aspect
         full = View(width / 2, height / 2, self.full_w)

@@ -42,6 +42,7 @@ class VideoInfo:
     duration: float
     has_audio: bool
     rotation: int = 0  # phones store portrait video as landscape plus a rotation; ffmpeg applies it when decoding
+    video_start: float = 0.0  # when the video's first frame is, on the file's clock (MKV and others can start it late)
 
 
 def probe(path: str | Path) -> VideoInfo:
@@ -57,7 +58,26 @@ def probe(path: str | Path) -> VideoInfo:
     measured = video_duration(path)
     if measured and (not info.duration or abs(info.duration - measured) > 0.5):
         info.duration = measured + 1 / info.fps
+    info.video_start = first_frame_time(path)
     return info
+
+
+def first_frame_time(path: str | Path) -> float:
+    """The first video frame's time on the file's clock: decoding starts the video at 0, and the sound has to be
+    shifted by this to stay in step (a video that starts after its sound)."""
+    r = subprocess.run([ffmpeg_exe(), "-hide_banner", "-i", str(path), "-map", "0:V:0", "-frames:v", "1", "-vf", "showinfo",
+                        "-f", "null", "-"], capture_output=True, text=True, errors="replace")
+    m = re.search(r"pts_time:\s*(-?[\d.]+)", r.stderr)
+    return max(0.0, float(m.group(1))) if m else 0.0
+
+
+def audio_align(video_start: float) -> str:
+    """Filters that put the sound on the video's clock: aresample fills a late start with silence (so the sound is
+    on the file's clock from 0), atrim drops what comes before the video's first frame."""
+    chain = "aresample=async=1:first_pts=0"
+    if video_start > 0.001:
+        chain += f",atrim=start={video_start:.3f},asetpts=PTS-STARTPTS"
+    return chain
 
 
 def video_duration(path: str | Path) -> float | None:
@@ -131,7 +151,7 @@ class Encoder:
     """Frames in (RGB, uint8), an H.264 MP4 out, with the source's audio copied alongside."""
 
     def __init__(self, out: str | Path, width: int, height: int, fps: float, audio_from: str | Path | None = None,
-                 crf: int = 18, preset: str = "medium", audio_graph: str | None = None):
+                 crf: int = 18, preset: str = "medium", audio_graph: str | None = None, video_start: float = 0.0):
         """`audio_graph`: a filter graph from the source's audio ([1:a:0]) to [aout], when the timing changes."""
         cmd = [ffmpeg_exe(), "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", f"{fps}",
                "-i", "-"]
@@ -141,7 +161,8 @@ class Encoder:
         elif audio_from:
             # apad: audio shorter than the video is padded with silence, so the video is not cut where the sound
             # ends; -shortest then ends both with the video.
-            cmd += ["-i", str(audio_from), "-map", "0:v", "-map", "1:a:0?", "-af", "apad", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+            cmd += ["-i", str(audio_from), "-map", "0:v", "-map", "1:a:0?", "-af", f"{audio_align(video_start)},apad", "-c:a", "aac",
+                    "-b:a", "192k", "-shortest"]
         # RGB to YUV with the HD matrix, and said so in the file: untagged HD video is shown as BT.709 by most
         # players, and swscale's default (BT.601) would shift the colours.
         cmd += ["-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p", "-c:v", "libx264", "-preset", preset, "-crf", str(crf),

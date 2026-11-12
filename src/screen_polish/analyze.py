@@ -1,8 +1,10 @@
 """Where things happen on screen, and when: from frame differences to a zoom plan.
 
-The video is decoded small (320 px wide, 8 frames a second, gray) and each frame is compared with the
-one before. Changed pixels are pooled into 8x8 cells, so that compression noise does not count. Not
-every change means "look here", so each changed cell is sorted:
+The video is decoded small (at most 640 px wide, 8 frames a second, gray) and each frame is compared
+with the one before. Changed pixels are pooled into 8x8 cells, so that compression noise does not count,
+and a cell only counts when some pixel in it changed a lot: an encoder's keyframe or a quality change on a
+still screen moves pixels by 30 grey levels or so, a typed character by 200. Not every change means "look
+here", so each changed cell is sorted:
 
 - **reverting**: the cell went back to a state it had in the last 2 seconds. A blinking caret, the
   mouse moving off something, a hover effect ending. Ignored.
@@ -33,6 +35,8 @@ from .media import VideoInfo, frames
 ANALYSIS_WIDTH = 640  # at most; a 1080p screen's 14 px text still has strokes at a third of its size
 ANALYSIS_FPS = 8
 NOISE = 24  # a gray level change below this is compression noise
+STRONG = 64  # a cell counts only if some pixel in it changed this much (seen: x264 keyframes and quality changes on a
+#              still screen at 30 fps reach about 33; typing about 220)
 CELL = 8  # analysis pixels per cell side
 CELL_ACTIVE = 0.05  # share of a cell's pixels that must change for it to count
 GLOBAL = 0.30  # share of changed cells above which the whole screen changed
@@ -49,6 +53,8 @@ EARLY_ANCHORS = 8  # cells: in the first MEMORY seconds there is no history to r
 #                    cells in all (typing adds up; the mouse leaving where it started, or resting at the end, does not)
 SETTLE = 0.5  # seconds: nothing in the first half second starts a zoom (seen: the first frames of an encode differing
 #              in a hundred scattered cells with one build of ffmpeg; and recorders' countdowns disappear then)
+STILL_MOTION = 4  # cells: at most this much strong change in a moment, reverting changes included, for it to be still
+#                   (a caret is 1 to 3 cells; a moving pointer more)
 SEGMENT_ANCHORS = 3  # cells: what a zoom needs in all, so that one pointer-sized blip cannot start one
 
 
@@ -60,6 +66,8 @@ class Activity:
     share: np.ndarray  # (T,) share of cells that changed at all: is the whole screen changing?
     width: int  # the source's size, to map cells back to pixels
     height: int
+    motion: np.ndarray | None = None  # (T,) cells that changed strongly, reverting ones included: is anything moving?
+    tentative_after: float = float("inf")  # from here to the end there is no future to see a change undone
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -93,7 +101,7 @@ def classify(stream, fps: float, width: int, height: int) -> Activity:
     persist, undo = max(1, round(PERSIST * fps)), max(1, round(UNDO * fps))
     ahead = max(persist, undo)
     buf: deque[np.ndarray] = deque(maxlen=back + 1 + ahead)
-    times, grids, anchors, share = [], [], [], []
+    times, grids, anchors, share, motion = [], [], [], [], []
     rows = cols = 0
     count = 0
 
@@ -106,6 +114,7 @@ def classify(stream, fps: float, width: int, height: int) -> Activity:
         idx = np.nonzero(changed)
         if len(idx[0]):  # only the cells that changed are compared with the past and the future: few, usually
             now, before = blocks(f, idx, rows, cols), blocks(prev, idx, rows, cols)
+            strong = np.abs(now - before).max(axis=(1, 2)) >= STRONG
             reverting = np.zeros(len(idx[0]), bool)
             for old in frames_[: pos - 1]:
                 reverting |= same_blocks(now, blocks(old, idx, rows, cols))
@@ -113,16 +122,18 @@ def classify(stream, fps: float, width: int, height: int) -> Activity:
             undone = np.zeros(len(idx[0]), bool)
             for later in frames_[pos + 1: pos + 1 + undo]:
                 undone |= same_blocks(blocks(later, idx, rows, cols), before)
-            fresh[idx] = ~reverting
-            anchor[idx] = ~reverting & persists & ~undone
-            if pos + undo >= len(frames_) and anchor.sum() < EARLY_ANCHORS:
-                anchor[:] = False  # the end of the video: no future to see it undone, so only a big change counts
-            if j / fps < SETTLE:
-                anchor[:] = False  # the recording settling: the recorder's own countdown leaving, the encoder's first frames
+            fresh[idx] = ~reverting & strong
+            anchor[idx] = ~reverting & strong & persists & ~undone
+            moving = int(strong.sum())
+        else:
+            moving = 0
+        if j / fps < SETTLE:
+            anchor[:] = False  # the recording settling: the recorder's own countdown leaving, the encoder's first frames
         times.append(j / fps)
         grids.append(fresh)
         anchors.append(anchor)
         share.append(float(changed.mean()))
+        motion.append(moving)
 
     for f in stream:
         if not rows:
@@ -139,7 +150,9 @@ def classify(stream, fps: float, width: int, height: int) -> Activity:
     shape = (0, max(rows, 1), max(cols, 1))
     g = np.array(grids, bool) if grids else np.zeros(shape, bool)
     a = np.array(anchors, bool) if anchors else np.zeros(shape, bool)
-    return Activity(np.array(times, float), g, a, np.array(share, float), width, height)
+    # The last UNDO seconds: anchors there are tentative (plan() counts them only when they add up, as at the start).
+    tentative = max(0, count - undo) / fps if count else float("inf")
+    return Activity(np.array(times, float), g, a, np.array(share, float), width, height, np.array(motion, int), tentative)
 
 
 def same_cells(a: np.ndarray, b: np.ndarray, rows: int, cols: int, invert: bool = False) -> np.ndarray:
@@ -184,7 +197,8 @@ def plan(act: Activity, max_zoom: float = 2.0) -> list[Zoom]:
     while t <= duration:
         inside = (act.times >= t) & (act.times < t + WINDOW)
         box = None
-        early = inside & (act.times < MEMORY)  # no history yet: these count only when they add up
+        # No history yet (the start), or no future (the end): these count only when they add up.
+        early = inside & ((act.times < MEMORY) | (act.times >= act.tentative_after))
         found = int(act.anchors[inside & ~early].sum())
         found_early = int(act.anchors[early].sum())
         anchored = found + (found_early if found_early >= EARLY_ANCHORS else 0) >= 1
@@ -214,7 +228,9 @@ def plan(act: Activity, max_zoom: float = 2.0) -> list[Zoom]:
         if zooms:  # windows overlap, so a segment can begin inside the last one: it starts where that ends
             start = max(start, zooms[-1].end)
         span = (act.times >= s["start"]) & (act.times < s["end"])  # counted once each: windows overlap
-        if end - start < MIN_SEGMENT or int(act.anchors[span].sum()) < SEGMENT_ANCHORS:
+        soft = span & ((act.times < MEMORY) | (act.times >= act.tentative_after))  # as in the windows: only if they add up
+        firm, unsure = int(act.anchors[span & ~soft].sum()), int(act.anchors[soft].sum())
+        if end - start < MIN_SEGMENT or firm + (unsure if unsure >= EARLY_ANCHORS else 0) < SEGMENT_ANCHORS:
             continue
         z = _zoom_rect(s["box"], act.width, act.height, max_zoom)
         if z:

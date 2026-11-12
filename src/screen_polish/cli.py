@@ -23,7 +23,7 @@ from .analyze import Zoom, activity, add_clicks, plan, wide_moments
 from .camera import Camera
 from .media import MediaError, probe, to_gif
 from .render import BACKGROUNDS, Style, render
-from .timeline import Speedup, Timeline, idle_stretches
+from .timeline import Speedup, Timeline, idle_stretches, protect
 
 PLAN_VERSION = 1
 
@@ -188,30 +188,46 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{src.name}: {info.width}x{info.height}, {info.fps:g} fps, {info.duration:.1f} s"
               f"{', with audio' if info.has_audio else ''}", file=sys.stderr)
 
+        if args.plan and args.clicks:
+            raise ValueError("--clicks has no effect with --plan (the plan already says where to zoom); use one or the other")
+        if style.aspect and abs(style.aspect / (info.width / info.height) - 1) < 0.005:
+            style.aspect = None  # within half a percent of the source's shape: no hairline bars for a pixel's difference
         wide: list[float] = []
         zooms: list[Zoom] = []
         speedups: list[Speedup] = []
+        detect_still = bool(args.speed_idle)
         if args.plan:
             data = json.loads(Path(args.plan).read_text(encoding="utf-8"))
             zooms, wide = plan_from_json(data, info)
             speedups = speedups_from_json(data)
             if args.no_zoom:
                 zooms = []
-        elif not args.no_zoom or args.speed_idle:
+            if speedups and args.speed_idle:
+                print("  the plan's speed-ups are used; --speed-idle is not applied on top of them", file=sys.stderr)
+            detect_still = bool(args.speed_idle) and not speedups
+        if detect_still or (not args.plan and not args.no_zoom):
             print("  finding where things happen ...", file=sys.stderr)
             act = activity(src, info)
-            wide = wide_moments(act)
-            if args.speed_idle:
+            if not args.plan:
+                wide = wide_moments(act)
+            if detect_still:
                 speedups = idle_stretches(act, factor=args.speed_idle, min_idle=args.idle_min)  # before the clicks are added
             if args.clicks:
                 add_clicks(act, load_clicks(args.clicks))
-            if not args.no_zoom:
+            if not args.plan and not args.no_zoom:
                 zooms = plan(act, max_zoom=max(1.0, args.max_zoom))
+        camera = Camera(zooms, info.width, info.height, info.duration, wide=wide, aspect=style.aspect)
         for z in zooms:
-            print(f"  zoom {z.start:6.1f}-{z.end:6.1f} s  {info.width / z.w:.1f}x on ({z.x:.0f}, {z.y:.0f}) {z.w:.0f}x{z.h:.0f}", file=sys.stderr)
+            shown = min(camera.full_w, max(z.w, z.h * camera.aspect))  # what the camera shows of it, in this output's shape
+            print(f"  zoom {z.start:6.1f}-{z.end:6.1f} s  {camera.full_w / shown:.1f}x on ({z.x:.0f}, {z.y:.0f}) {z.w:.0f}x{z.h:.0f}",
+                  file=sys.stderr)
         if not zooms and not args.no_zoom:
             print("  no zoom: the activity is spread over the screen, or there is none", file=sys.stderr)
-        timeline = Timeline(speedups, info.duration)
+        if detect_still:
+            # Each camera move at normal speed: squeezed into a quarter of its time it is a jolt. (A plan's own
+            # speed-ups are left as written.)
+            speedups = protect(speedups, [(at, at + camera.t) for at, _ in camera.shots[1:]])
+        timeline = Timeline(speedups, info.duration, fps=info.fps)
         if timeline.sped:
             print(f"  {len(speedups)} still stretch{'es' if len(speedups) != 1 else ''} sped up: {info.duration:.1f} s becomes "
                   f"{timeline.out_duration():.1f} s", file=sys.stderr)
@@ -228,7 +244,6 @@ def main(argv: list[str] | None = None) -> int:
         if out.resolve() == src.resolve():
             raise ValueError("the output would overwrite the input; choose another name with -o")
         crf, preset = {"draft": (24, "veryfast"), "good": (18, "medium"), "best": (15, "slow")}[args.quality]
-        camera = Camera(zooms, info.width, info.height, info.duration, wide=wide, aspect=style.aspect)
         if out.suffix.lower() == ".gif":
             with tempfile.TemporaryDirectory() as tmp:
                 mp4 = Path(tmp) / "polished.mp4"
