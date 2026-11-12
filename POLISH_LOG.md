@@ -142,3 +142,28 @@ The whole thing read again, both READMEs checked claim by claim, and measured on
 **Open**
 - Real recordings (downloading public samples needs the user's go-ahead; asked again).
 - A tighter vertical crop.
+
+## Round 5 — 2026-11-12: 1.0.0
+
+**Run from GitHub, as a user would**: `uvx --from git+https://github.com/zch6a/screen-polish screen-polish demo.mp4 --speed-idle 4 --aspect 9:16`: fetched, installed (numpy, Pillow, imageio-ffmpeg) and rendered in 21 s; a 360x640 video of the right length, with sound.
+
+**The sound graph on a long video**, the one thing round 4 had not measured: `asplit` feeds every part while `concat` reads them in order, which could have kept the whole decoded sound in memory. Measured on the 10-minute recording (75 parts): ffmpeg stays at about 40 MB and takes 0.8 s. (A measuring run of mine never ended: I had left out the length, and the graph ends in `apad`, which pads silence for ever. Renders end with the video, `-shortest`; nothing to fix there.)
+
+**Read once more**: one docstring said the timeline maps output time back to source time, which it does not; corrected. Nothing else found.
+
+**1.0.0**: version set, "in development" removed; the status says what is tested and what is not (real recordings). Tag `v1.0.0`.
+
+**Tests**: 59.
+
+## Summary
+
+screen-polish makes a screen recording you already have look produced: it zooms where things happen, found from the pixels alone, frames the video on a background, and can speed up the still stretches and make it vertical. One local command; the zooms are a JSON plan you can edit.
+
+What mattered most, in hindsight:
+- **Not every change means "look here".** The first version zoomed on a blinking caret for a whole video. Sorting changes into reverting (ignored), persistent (can start a zoom) and passing (can only keep one going), with a strong-change threshold under which encoder noise falls, is what made pixel-only zooming work; most of the defects found came back to this.
+- **The reviews and CI found what the synthetic tests hid**: chunky test text hid that real 14 px text vanished at 320 px; 15 fps tests hid encoder noise at 30 fps; Windows hid what macOS's ffmpeg did to the first frames; clean timestamps hid sound drifting a frame per sped-up stretch.
+- **Measuring before optimising**: rendering was slow because of how frames were read from the pipe (ten times), not drawing; memory peaked because of the background gradient, not the frames read ahead.
+
+Rounds: development (12 tests) → 1 caret and mouse, first review, macOS (37) → 2 still stretches sped up, faster rendering (41) → 3 vertical video, second review (56) → 4 4K and long videos, ten times faster reading, half the memory (59) → 5 run from GitHub, 1.0.0.
+
+Still open: real recordings (every test uses drawn ones; downloading public samples needs the user's go-ahead), a tighter vertical crop, the cursor (part of the picture, so it stays as recorded).

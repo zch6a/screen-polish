@@ -51,7 +51,8 @@ def idle_stretches(act: Activity, factor: float = 4.0, min_idle: float = 2.0, ma
 
 
 class Timeline:
-    """Source time to output time and back, for a list of speed-ups (sorted, not overlapping)."""
+    """How fast each moment of the source plays, for a list of speed-ups: the parts at normal speed and the fast
+    ones, in order and not overlapping, and the sound graph that matches them."""
 
     def __init__(self, speedups: list[Speedup], duration: float, fps: float | None = None):
         """With `fps`, each speed-up starts on a frame and lasts a whole number of output frames: the video can only

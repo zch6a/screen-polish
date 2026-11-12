@@ -116,7 +116,7 @@ only reads the video file you give it. Its own tests use recordings drawn by a s
 
 ## Status
 
-0.1, in development. Tested on synthetic recordings with a known script (where the zooms must land,
+1.0. Tested on synthetic recordings with a known script (where the zooms must land,
 when the whole screen must show, how much a 2x zoom enlarges, that sound and picture stay together,
 caret, mouse, dark themes, 4K, phones, 15 to 60 fps), on Windows, macOS and Linux in CI, and reviewed
 twice by someone who had not written it ([POLISH_LOG.md](POLISH_LOG.md)). Not yet tried on real

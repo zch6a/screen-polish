@@ -1,6 +1,6 @@
 [project]
 name = "screen-polish"
-version = "0.1.0"
+version = "1.0.0"
 description = "Make a screen recording you already have look produced: zoom where things happen, found from the pixels, and frame it on a background. A command, no special recorder."
 readme = "README.md"
 license = "MIT"
