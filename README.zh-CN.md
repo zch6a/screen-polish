@@ -58,7 +58,7 @@ screen-polish demo.mp4 --aspect 9:16            # 竖屏，用于 Shorts、Reels
 screen-polish demo.mp4 --width 1280 --quality draft
 ```
 
-声音会保留（编码为 AAC；比视频短时，结尾用静音补齐）。使用 `--speed-idle` 时，加速片段的声音也会一起加速（音调不变）：如果你在静止画面上说话，那段话也会变快，所以默认不开。镜头移动始终保持正常速度。加速的片段会写进放大方案（`"speed"`），可以在那里删除或修改。安装成命令：`uv tool install git+https://github.com/zch6a/screen-polish`，或 `pip install "screen-polish @ git+https://github.com/zch6a/screen-polish"`。需要 Python 3.10+。PATH 上有 ffmpeg 就用它；没有的话，用随包一起装上的那份（`imageio-ffmpeg`）。
+输出是 MP4（H.264；`.mp4`、`.m4v` 或 `.mov`）或 GIF。声音会保留（编码为 AAC；比视频短时，结尾用静音补齐）。使用 `--speed-idle` 时，加速片段的声音也会一起加速（音调不变）：如果你在静止画面上说话，那段话也会变快，所以默认不开。镜头移动始终保持正常速度。加速的片段会写进放大方案（`"speed"`），可以在那里删除或修改。安装成命令：`uv tool install git+https://github.com/zch6a/screen-polish`，或 `pip install "screen-polish @ git+https://github.com/zch6a/screen-polish"`。需要 Python 3.10+。PATH 上有 ffmpeg 就用它；没有的话，用随包一起装上的那份（`imageio-ffmpeg`）；用 `SCREEN_POLISH_FFMPEG=ffmpeg 的路径` 可以另选一个。
 
 ## 它（暂时）做不到的
 
@@ -66,7 +66,7 @@ screen-polish demo.mp4 --width 1280 --quality draft
 - **一直在变的东西会吸引镜头**：角落里在播放的视频、动画广告、实时图表。选错地方时，修改放大方案即可。
 - **竖屏视频显示的区域和横屏的放大一样**：整个屏幕放在上下黑边之间；放大时画面占得更满，但上下仍有黑边。要裁得更紧、铺满竖屏，需要知道动作区域本身的大小，暂时还没做。
 - 还不能加字幕。
-- 速度：1080p 比实时略快（在 i9-12900H 笔记本上，20 秒的 1080p30 渲染用了 19 秒）。
+- 速度（i9-12900H 笔记本）：20 秒的 1080p30 用 18 秒；20 秒的 4K30 用 78 秒（加 `--width 1920` 可以输出 1080p）；10 分钟的 1080p30 加 `--speed-idle 4` 用 443 秒。内存：这 10 分钟约 170 MB，4K 约 330 MB。
 
 ## 隐私
 
@@ -74,7 +74,7 @@ screen-polish demo.mp4 --width 1280 --quality draft
 
 ## 状态
 
-0.1，开发中。用脚本已知的合成录像测试（放大必须落在哪里、什么时候必须显示整个屏幕、2 倍放大让内容变大多少、声音和时长是否保留），CI 在 Windows、macOS 和 Linux 上运行。
+0.1，开发中。用脚本已知的合成录像测试（放大必须落在哪里、什么时候必须显示整个屏幕、2 倍放大让内容变大多少、声音和画面是否同步，以及输入光标、鼠标、深色主题、4K、手机、15 到 60 fps），CI 在 Windows、macOS 和 Linux 上运行，并由没写过它的人独立审查过两次（[POLISH_LOG.md](POLISH_LOG.md)）。还没有在真实录像上试过。
 
 ## 开发
 

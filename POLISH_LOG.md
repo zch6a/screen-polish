@@ -121,3 +121,24 @@ Checked and sound, per the review: the prefetch thread (Ctrl+C stops it in under
 **Open**
 - Real recordings (downloading public samples needs the user's go-ahead; asked, no answer yet).
 - A tighter vertical crop.
+
+## Round 4 — 2026-11-12
+
+The whole thing read again, both READMEs checked claim by claim, and measured on bigger inputs than the tests use (synthetic: the demo script drawn at 4K, and a 10-minute 1080p recording, both 30 fps with sound).
+
+**Reading frames was ten times too slow.** 20 s of 4K took 154 s to render, and asking for a 1080p output barely helped (135 s). Timing each stage: probing 0.4 s, analysis 0.9 s, decoding the 600 full-size frames 126 s, while ffmpeg alone decodes them to nowhere in 1.5 s. The cost was in reading the pipe: one `read()` of a whole 25 MB frame through a 100 MB Python buffer. Read unbuffered, in 1 MB pieces straight into the frame's own buffer, the same frames come in 9.4 s. 4K now renders in 78 s (drawing is the limit there: 83 ms a frame; encoding with any preset is about 20 ms). 1080p was already limited by drawing and stays at 18 s for 20 s.
+
+**Memory**: a 4K render peaked at 634 MB. Not the frames read ahead (6 then, now sized to about 64 MB: 2 at 4K, 6 at 1080p) but the background gradient, computed once in float64 on full-size grids: about 400 MB for a moment. Now from two 1-D ramps, one channel at a time in float32: 4K peaks at 326 MB. 10 minutes of 1080p with `--speed-idle 4` (76 zooms, 37 still stretches, 600 s becoming 485 s) took 443 s and peaked at 170 MB, analysis data for the whole video included.
+
+**Found reading the code**
+- `-o clip.webm` (or `.mkv`, `.avi`, no extension) wrote an MP4 under that name; now refused, with the kinds that are written (`.mp4`, `.m4v`, `.mov`, `.gif`). An output folder that does not exist gave ffmpeg's error; now a plain one.
+- A bad option was only reported after three ffmpeg runs reading the video; now the options are checked first.
+- The camera and the timeline scanned every shot and every speed-up for each frame: fine for a demo, quadratic for a long video with hundreds of zooms. Now a binary search.
+
+**READMEs**: the sample output was out of date (the menu zoom now ends at 9.0 s, the file is 0.3 MB): rerun and replaced, and the demo GIFs made again from the current code; the output kinds, `SCREEN_POLISH_FFMPEG`, the speed and memory above, and a status that says what is tested (caret, mouse, dark themes, 4K, phones, 15 to 60 fps, sound and picture together, two reviews) and what is not (real recordings).
+
+**Tests**: 59 (+3): output kinds and folders refused before anything is written, a bad option said before the video is read, look-ups with 400 zooms.
+
+**Open**
+- Real recordings (downloading public samples needs the user's go-ahead; asked again).
+- A tighter vertical crop.

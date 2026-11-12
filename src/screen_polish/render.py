@@ -51,11 +51,16 @@ def _color(s: str) -> tuple[int, int, int]:
 
 def background(style: Style, width: int, height: int) -> Image.Image:
     a, b = BACKGROUNDS.get(style.background, (style.background, style.background))
-    ca, cb = np.array(_color(a), float), np.array(_color(b), float)
-    yy, xx = np.mgrid[0:height, 0:width]
-    p = ((xx / max(1, width - 1)) + (yy / max(1, height - 1))) / 2  # diagonal
-    img = ca + (cb - ca) * p[..., None]
-    return Image.fromarray(img.round().astype(np.uint8), "RGB")
+    ca, cb = _color(a), _color(b)
+    # Diagonal, from two 1-D ramps and one channel at a time in float32: full-size float64 grids took about
+    # 400 MB at 4K for a moment, the peak of the whole run.
+    x = np.linspace(0, 0.5, width, dtype=np.float32)[None, :]
+    y = np.linspace(0, 0.5, height, dtype=np.float32)[:, None]
+    p = x + y
+    img = np.empty((height, width, 3), np.uint8)
+    for c in range(3):
+        img[..., c] = np.rint(ca[c] + (cb[c] - ca[c]) * p)
+    return Image.fromarray(img, "RGB")
 
 
 def even(n: float) -> int:
@@ -211,7 +216,9 @@ def render(path, out, info: VideoInfo, camera: Camera, style: Style, out_width: 
     n = 0
     clock = 0.0  # output seconds so far
     try:
-        for i, f in enumerate(prefetch(frames(path, info.width, info.height, info.fps))):
+        # A few frames ahead, about 64 MB of them: 6 at 1080p, 2 at 4K (25 MB a frame).
+        depth = max(2, min(6, (64 << 20) // (info.width * info.height * 3)))
+        for i, f in enumerate(prefetch(frames(path, info.width, info.height, info.fps), depth=depth)):
             t = i / info.fps
             clock += 1 / (info.fps * (timeline.speed_at(t) if timeline else 1.0))
             want = round(clock * info.fps)  # output frames that should exist by now

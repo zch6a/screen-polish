@@ -11,6 +11,7 @@ is only done when asked for.
 
 from __future__ import annotations
 
+import bisect
 import math
 from dataclasses import asdict, dataclass
 
@@ -72,15 +73,16 @@ class Timeline:
             t = end
         if t < duration:
             self.parts.append(Speedup(t, duration, 1.0))
+        self._starts = [p.start for p in self.parts]
 
     @property
     def sped(self) -> bool:
         return any(p.factor != 1.0 for p in self.parts)
 
     def speed_at(self, t: float) -> float:
-        for p in self.parts:
-            if p.start <= t < p.end:
-                return p.factor
+        k = bisect.bisect_right(self._starts, t) - 1  # once per frame: no scan of every part
+        if 0 <= k < len(self.parts) and t < self.parts[k].end:
+            return self.parts[k].factor
         return 1.0
 
     def out_duration(self) -> float:

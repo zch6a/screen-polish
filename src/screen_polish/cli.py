@@ -26,6 +26,7 @@ from .render import BACKGROUNDS, Style, render
 from .timeline import Speedup, Timeline, idle_stretches, protect
 
 PLAN_VERSION = 1
+OUTPUT_TYPES = (".mp4", ".m4v", ".mov", ".gif")  # the MP4 kinds are all written as MP4 (H.264 and AAC)
 
 
 def plan_to_json(zooms: list[Zoom], info, source: str, wide: list[float] | None = None, speedups: list[Speedup] | None = None) -> dict:
@@ -166,7 +167,6 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         src = Path(args.input)
-        info = probe(src)
         if not 0 <= args.padding <= 40:
             raise ValueError("--padding is a share of the width: 0 to 40")
         if not 0 <= args.radius <= 20:
@@ -179,17 +179,23 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--speed-idle must be more than 1 and at most 16")
         if not 1.0 <= args.idle_min <= 600:
             raise ValueError("--idle-min must be between 1 and 600 seconds")
+        if args.plan and args.clicks:
+            raise ValueError("--clicks has no effect with --plan (the plan already says where to zoom); use one or the other")
+        out = Path(args.output) if args.output else _default_out(src)
+        if out.suffix.lower() not in OUTPUT_TYPES:
+            raise ValueError(f"-o {out.name}: the output is an MP4 ({', '.join(OUTPUT_TYPES[:-1])}) or a GIF (.gif)")
+        if not out.resolve().parent.is_dir():
+            raise ValueError(f"-o {out}: the folder {out.resolve().parent} does not exist")
         style = Style(background=args.background, padding=args.padding / 100, radius=args.radius / 100,
                       shadow=not args.no_shadow, frame=not args.no_frame, aspect=parse_aspect(args.aspect))
         if style.background not in BACKGROUNDS:
             from .render import _color
 
             _color(style.background)  # a bad colour is said now, not after the analysis
+        info = probe(src)  # after the options: a mistake there is said at once, not after reading the video
         print(f"{src.name}: {info.width}x{info.height}, {info.fps:g} fps, {info.duration:.1f} s"
               f"{', with audio' if info.has_audio else ''}", file=sys.stderr)
 
-        if args.plan and args.clicks:
-            raise ValueError("--clicks has no effect with --plan (the plan already says where to zoom); use one or the other")
         if style.aspect and abs(style.aspect / (info.width / info.height) - 1) < 0.005:
             style.aspect = None  # within half a percent of the source's shape: no hairline bars for a pixel's difference
         wide: list[float] = []
@@ -240,7 +246,6 @@ def main(argv: list[str] | None = None) -> int:
             if not args.output:
                 return 0
 
-        out = Path(args.output) if args.output else _default_out(src)
         if out.resolve() == src.resolve():
             raise ValueError("the output would overwrite the input; choose another name with -o")
         crf, preset = {"draft": (24, "veryfast"), "good": (18, "medium"), "best": (15, "slow")}[args.quality]

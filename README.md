@@ -31,8 +31,8 @@ uvx --from git+https://github.com/zch6a/screen-polish screen-polish demo.mp4
 demo.mp4: 640x360, 15 fps, 11.0 s, with audio
   finding where things happen ...
   zoom    2.0-   5.0 s  2.0x on (320, 0) 320x180
-  zoom    7.0-   9.5 s  2.0x on (0, 180) 320x180
-  wrote demo.polished.mp4 (0.2 MB)
+  zoom    7.0-   9.0 s  2.0x on (0, 180) 320x180
+  wrote demo.polished.mp4 (0.3 MB)
 ```
 
 ## Why another one
@@ -84,12 +84,16 @@ screen-polish demo.mp4 --aspect 9:16            # vertical, for Shorts, Reels, T
 screen-polish demo.mp4 --width 1280 --quality draft
 ```
 
-The sound is kept (encoded as AAC; silence fills the end if it is shorter than the video). With
-`--speed-idle`, the sound of a sped-up stretch is sped up too, keeping its pitch: if you talk over a still
-screen, that talk is fast too, which is why it is off unless asked for. Camera moves are kept at normal speed.
-The stretches go into the plan (`"speed"`), so you can remove or change them there. Install the command with `uv tool install git+https://github.com/zch6a/screen-polish`
-or `pip install "screen-polish @ git+https://github.com/zch6a/screen-polish"`. It needs Python 3.10+.
-The ffmpeg on your PATH is used; without one, the copy that comes with it (the `imageio-ffmpeg` package).
+The output is an MP4 (H.264; `.mp4`, `.m4v` or `.mov`) or a GIF. The sound is kept (encoded as AAC;
+silence fills the end if it is shorter than the video). With `--speed-idle`, the sound of a sped-up
+stretch is sped up too, keeping its pitch: if you talk over a still screen, that talk is fast too, which
+is why it is off unless asked for. Camera moves are kept at normal speed. The stretches go into the plan
+(`"speed"`), so you can remove or change them there.
+
+Install the command with `uv tool install git+https://github.com/zch6a/screen-polish` or
+`pip install "screen-polish @ git+https://github.com/zch6a/screen-polish"`. It needs Python 3.10+. The
+ffmpeg on your PATH is used; without one, the copy that comes with it (the `imageio-ffmpeg` package);
+`SCREEN_POLISH_FFMPEG=/path/to/ffmpeg` chooses another.
 
 ## What it does not do (yet)
 
@@ -101,8 +105,9 @@ The ffmpeg on your PATH is used; without one, the copy that comes with it (the `
   bars, and a zoom fills more of the frame but keeps bars above and below. A tighter vertical crop that
   fills the frame would need the size of the activity itself; not yet.
 - No captions yet.
-- Speed: a little faster than real time for 1080p on a laptop (20 s of 1080p30 rendered in 19 s on an
-  i9-12900H).
+- Speed, on a laptop (i9-12900H): 20 s of 1080p30 in 18 s; 20 s of 4K30 in 78 s (`--width 1920` makes
+  a 1080p video from it); 10 minutes of 1080p30 with `--speed-idle 4` in 443 s. Memory: about 170 MB
+  for those 10 minutes, about 330 MB for 4K.
 
 ## Privacy
 
@@ -112,8 +117,10 @@ only reads the video file you give it. Its own tests use recordings drawn by a s
 ## Status
 
 0.1, in development. Tested on synthetic recordings with a known script (where the zooms must land,
-when the whole screen must show, how much a 2x zoom enlarges, that the sound and the length are kept),
-on Windows, macOS and Linux in CI.
+when the whole screen must show, how much a 2x zoom enlarges, that sound and picture stay together,
+caret, mouse, dark themes, 4K, phones, 15 to 60 fps), on Windows, macOS and Linux in CI, and reviewed
+twice by someone who had not written it ([POLISH_LOG.md](POLISH_LOG.md)). Not yet tried on real
+recordings.
 
 ## Develop
 

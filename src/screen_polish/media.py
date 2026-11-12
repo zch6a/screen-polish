@@ -117,6 +117,9 @@ def parse_probe(text: str, name: str = "input") -> VideoInfo:
     return VideoInfo(w, h, round(fps, 3), duration, bool(re.search(r"Stream #\S+.*?: Audio: ", text)), rotation)
 
 
+READ_CHUNK = 1 << 20
+
+
 def frames(path: str | Path, width: int, height: int, fps: float, gray: bool = False):
     """Decoded frames at a constant `fps`, scaled to width x height: uint8 arrays (H, W) or (H, W, 3)."""
     pix, channels = ("gray", 1) if gray else ("rgb24", 3)
@@ -127,12 +130,21 @@ def frames(path: str | Path, width: int, height: int, fps: float, gray: bool = F
     import tempfile
 
     with tempfile.TemporaryFile() as errfile:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errfile, bufsize=size * 4)
+        # Unbuffered, read in 1 MB pieces straight into the frame's own buffer: one read() of a whole 4K frame
+        # (25 MB) through a big Python buffer ran at a tenth of the speed (126 s for 600 frames, against 7 s).
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errfile, bufsize=0)
         finished = False
         try:
             while True:
-                buf = proc.stdout.read(size)
-                if len(buf) < size:
+                buf = bytearray(size)
+                view = memoryview(buf)
+                got = 0
+                while got < size:
+                    k = proc.stdout.readinto(view[got:got + READ_CHUNK])
+                    if not k:
+                        break
+                    got += k
+                if got < size:
                     finished = True
                     break
                 a = np.frombuffer(buf, np.uint8)

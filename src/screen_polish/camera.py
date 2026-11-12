@@ -8,6 +8,7 @@ of the size, so a 2x zoom feels as fast at its start as at its end.
 
 from __future__ import annotations
 
+import bisect
 import math
 from dataclasses import dataclass
 
@@ -72,6 +73,7 @@ class Camera:
             if leave < duration:
                 shots.append((leave, full))
         self.shots = shots
+        self._starts = [s for s, _ in shots]
 
     def _clamp(self, v: View) -> View:
         """No wider than the whole screen; inside the source where the view fits in it, centred on it where
@@ -83,10 +85,7 @@ class Camera:
         return View(cx, cy, w)
 
     def at(self, t: float) -> View:
-        k = 0
-        for i, (start, _) in enumerate(self.shots):
-            if start <= t:
-                k = i
+        k = max(0, bisect.bisect_right(self._starts, t) - 1)  # the last shot started by t (once per frame: no scan)
         start, target = self.shots[k]
         if k == 0 or t >= start + self.t:
             return target
