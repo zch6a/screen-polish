@@ -102,3 +102,22 @@ Looked at on a contact sheet of the demo made vertical: the whole screen between
 **Tests**: 45 (+4): parsing and checking shapes, the layout (long side kept, `--width`), the camera's whole-screen view in a vertical frame, a rendered vertical video (360x640, bars above the screen, the screen in the middle, a zoom cutting the bars from about two thirds of the frame to under half).
 
 A second independent review (of rounds 1–3) is running; its findings go in part 2.
+
+## Round 3 — part 2: the second independent review
+
+A second reviewer, new to the code, tried to break rounds 1–3 with synthetic recordings and reproduced 11 of 12 findings; all are fixed, the reviewer's scripts were rerun against the fixes, and `tests/test_review2.py` holds 11 regression tests (9 fail on the code before; 2 pin what already worked).
+
+- **Encoder noise was activity at 30 fps.** The tests always ran at 15 fps. At 30 fps, x264's quality changes on a still screen (and its keyframes, every 250 frames by default) made anchors: the demo's first zoom started 1.5 s late, and a still stretch broke into three, the video and the narration dropping back to normal speed between them. That noise moves pixels by about 33 grey levels; typing by about 220. Now a cell counts only when some pixel in it changed by 64 or more. The demo gets the same zooms at 15, 25, 30 and 60 fps, and a still screen stays one stretch whatever the keyframe interval.
+- **Sound out of step with `--speed-idle`**: a sound track starting after the video was pulled earlier by its offset (`asetpts=PTS-STARTPTS` closed the gap); and each sped-up stretch could put sound and picture a frame apart, the errors adding up. Now the sound is first put on the file's clock (`aresample=async=1:first_pts=0`) and shifted by the video's own start (measured from its first frame); speed-ups start on a frame and last a whole number of output frames, so video and sound change speed at the same instants. A test puts a flash and a beep at the same moments on both sides of a sped-up stretch: they stay within 80 ms.
+- **Camera moves squeezed** into a quarter of their time when they fell in a sped-up stretch (the camera leaves 0.8 s after the activity, a speed-up starts 0.5 s after it). Now detected speed-ups are cut around every camera move; a plan's own speed-ups are left as written.
+- **Typing in the last 2 s never got a zoom**: anchors there had to be big one by one. Now they are tentative and count when they add up, as at the start.
+- **A pointer circling one spot counted as still** (its changes all revert), so the talk over it was sped up. Now a moment is still only when little changes strongly, reverting changes included.
+- `--speed-idle` was silently ignored with `--plan` (now applied when the plan has no speed-ups; noted when it has); `--clicks` with `--plan` is now an error; `--padding` meant a share of the shorter side with `--aspect` and of the width without (now always the width, as the help says); a source a pixel off the requested shape (1081x1920 as 9:16) got hairline bars (now shapes within half a percent count as the same); the printed zoom factor ignored a rectangle's height and the output's shape (now what the camera shows).
+
+Checked and sound, per the review: the prefetch thread (Ctrl+C stops it in under half a second with nothing left running), inputs of 1 to 12 frames, extreme shapes and widths, letterbox placement, consistent detection from 320 to 1280 px wide.
+
+**Tests**: 56 (+11).
+
+**Open**
+- Real recordings (downloading public samples needs the user's go-ahead; asked, no answer yet).
+- A tighter vertical crop.

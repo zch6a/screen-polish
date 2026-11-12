@@ -58,7 +58,7 @@ screen-polish demo.mp4 --aspect 9:16            # 竖屏，用于 Shorts、Reels
 screen-polish demo.mp4 --width 1280 --quality draft
 ```
 
-声音会保留（编码为 AAC；比视频短时，结尾用静音补齐）。使用 `--speed-idle` 时，加速片段的声音也会一起加速（音调不变）：如果你在静止画面上说话，那段话也会变快，所以默认不开。加速的片段会写进放大方案（`"speed"`），可以在那里删除或修改。安装成命令：`uv tool install git+https://github.com/zch6a/screen-polish`，或 `pip install "screen-polish @ git+https://github.com/zch6a/screen-polish"`。需要 Python 3.10+。PATH 上有 ffmpeg 就用它；没有的话，用随包一起装上的那份（`imageio-ffmpeg`）。
+声音会保留（编码为 AAC；比视频短时，结尾用静音补齐）。使用 `--speed-idle` 时，加速片段的声音也会一起加速（音调不变）：如果你在静止画面上说话，那段话也会变快，所以默认不开。镜头移动始终保持正常速度。加速的片段会写进放大方案（`"speed"`），可以在那里删除或修改。安装成命令：`uv tool install git+https://github.com/zch6a/screen-polish`，或 `pip install "screen-polish @ git+https://github.com/zch6a/screen-polish"`。需要 Python 3.10+。PATH 上有 ffmpeg 就用它；没有的话，用随包一起装上的那份（`imageio-ffmpeg`）。
 
 ## 它（暂时）做不到的
 

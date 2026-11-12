@@ -86,8 +86,8 @@ screen-polish demo.mp4 --width 1280 --quality draft
 
 The sound is kept (encoded as AAC; silence fills the end if it is shorter than the video). With
 `--speed-idle`, the sound of a sped-up stretch is sped up too, keeping its pitch: if you talk over a still
-screen, that talk is fast too, which is why it is off unless asked for. The stretches go into the plan
-(`"speed"`), so you can remove or change them there. Install the command with `uv tool install git+https://github.com/zch6a/screen-polish`
+screen, that talk is fast too, which is why it is off unless asked for. Camera moves are kept at normal speed.
+The stretches go into the plan (`"speed"`), so you can remove or change them there. Install the command with `uv tool install git+https://github.com/zch6a/screen-polish`
 or `pip install "screen-polish @ git+https://github.com/zch6a/screen-polish"`. It needs Python 3.10+.
 The ffmpeg on your PATH is used; without one, the copy that comes with it (the `imageio-ffmpeg` package).
 
